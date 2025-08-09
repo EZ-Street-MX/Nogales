@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EZ Street MX | Mapa de Bacheo</title>
+  <meta name="description" content="Visualizador de baches con KML/GeoJSON. Listo para GitHub Pages. Sin login." />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#0f172a; --panel-2:#111827; --text:#e5e7eb; --muted:#94a3b8; --brand:#00a0e3; --accent:#22d3ee;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,"Helvetica Neue",Arial,"Noto Sans",sans-serif}
+    .app{display:grid;grid-template-rows:auto 1fr; height:100%}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 14px;background:linear-gradient(180deg,#0d1726,rgba(13,23,38,.6));border-bottom:1px solid rgba(255,255,255,.06); position:sticky; top:0; z-index:1000}
+    .brand{display:flex;gap:10px;align-items:center}
+    .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--brand),var(--accent)); box-shadow:0 0 0 2px rgba(255,255,255,.08) inset}
+    .title{font-weight:700; letter-spacing:.2px}
+    .controls{display:flex;flex-wrap:wrap; gap:8px; align-items:center}
+    .controls input[type="text"], .controls input[type="url"]{background:var(--panel-2); border:1px solid rgba(255,255,255,.08); color:var(--text); padding:8px 10px; border-radius:10px; min-width:240px}
+    .btn{background:#15223a; color:var(--text); border:1px solid rgba(255,255,255,.08); padding:8px 12px; border-radius:10px; cursor:pointer; transition:.15s; font-weight:600}
+    .btn:hover{transform:translateY(-1px); background:#192948}
+    .btn.secondary{background:var(--panel-2)}
+    .layout{display:grid; grid-template-columns: 320px 1fr; height:100%;}
+    .sidebar{background:var(--panel); border-right:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; min-width:0}
+    .side-head{padding:12px; border-bottom:1px solid rgba(255,255,255,.06);}
+    .search{width:100%; background:var(--panel-2); border:1px solid rgba(255,255,255,.08); color:var(--text); padding:9px 12px; border-radius:10px}
+    .list{overflow:auto}
+    .item{padding:12px; border-bottom:1px dashed rgba(255,255,255,.06); cursor:pointer}
+    .item:hover{background:rgba(255,255,255,.03)}
+    .item h4{margin:0 0 6px; font-size:14px}
+    .item .muted{color:var(--muted); font-size:12px}
+    #map{height:100%; width:100%}
+    .leaflet-container{background:#0b1220}
+    .popup table{border-collapse:collapse; width:100%}
+    .popup td{border-top:1px solid rgba(0,0,0,.1); padding:4px 6px; vertical-align:top}
+    .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:rgba(34,211,238,.15); color:#67e8f9; border:1px solid rgba(34,211,238,.3)}
+    .footer{padding:8px 12px; border-top:1px solid rgba(255,255,255,.06); color:var(--muted); font-size:12px; display:flex; align-items:center; gap:10px; justify-content:space-between}
+    .qr-panel{position:fixed; right:16px; bottom:16px; background:var(--panel); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:10px; box-shadow:0 8px 30px rgba(0,0,0,.4); display:none}
+    .qr-panel.open{display:block}
+    .qr-panel h4{margin:0 0 8px}
+    .hide-mobile{display:block}
+    @media (max-width:900px){
+      .layout{grid-template-columns: 1fr}
+      .sidebar{display:none}
+      .hide-mobile{display:none}
+    }
+  </style>
+</head>
+<body>
+  <!--
+    ==============================================
+    Mapa de Bacheo – EZ Street MX
+    ----------------------------------------------
+    ✔ Sin login. Funciona con un archivo KML (o GeoJSON).
+    ✔ Ideal para GitHub Pages. Solo sube este HTML y tu archivo .kml al repo.
+    ✔ Actualización del mapa: reemplaza el KML en el mismo path, recarga la página.
+    ✔ Carga por URL: ?data=https://.../baches.kml  (usa el RAW de GitHub)
+    ✔ También puedes cargar archivo local (botón "KML local").
+    ✔ Lista lateral + búsqueda + clúster de marcadores.
+    ✔ Botón para QR del enlace, listo para compartir.
+
+    Requisitos (CDN): Leaflet, MarkerCluster, Omnivore (KML), togeojson, QRCode.js
+    ----------------------------------------------
+  -->
+  <div class="app">
+    <header>
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div class="title">EZ Street MX · Mapa de Bacheo</div>
+      </div>
+      <div class="controls">
+        <input id="dataUrl" type="url" placeholder="URL del KML/GeoJSON (raw GitHub o público)" />
+        <button class="btn" id="btnLoadUrl">Cargar URL</button>
+        <input id="fileInput" type="file" accept=".kml,.kmz,.geojson,.json" hidden>
+        <button class="btn secondary" id="btnPickFile">KML local</button>
+        <button class="btn" id="btnRefresh">Actualizar</button>
+        <button class="btn" id="btnQR">Compartir QR</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="side-head">
+          <input id="search" class="search" type="text" placeholder="Buscar bache por nombre o texto..." />
+        </div>
+        <div id="list" class="list" role="listbox" aria-label="Lista de baches"></div>
+        <div class="footer hide-mobile">
+          <span id="status">Listo.</span>
+          <span class="badge" id="count">0</span>
+        </div>
+      </aside>
+      <main id="map"></main>
+    </div>
+  </div>
+
+  <div class="qr-panel" id="qrPanel" aria-live="polite">
+    <h4>Comparte este mapa</h4>
+    <div id="qrcode"></div>
+  </div>
+
+  <!-- Libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/@mapbox/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+  <script src="https://unpkg.com/togeojson@0.16.0/dist/togeojson.umd.js"></script>
+  <script src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+  <script>
+    // ===== Utilidades =====
+    const $ = (sel, p=document) => p.querySelector(sel);
+    const $$ = (sel, p=document) => Array.from(p.querySelectorAll(sel));
+    const statusEl = $('#status');
+    const countEl = $('#count');
+
+    const setStatus = (t) => statusEl && (statusEl.textContent = t);
+
+    // Guarda y lee última URL
+    const storeKey = 'ezstreet_baches_data_url';
+    const getParam = (k) => new URLSearchParams(location.search).get(k);
+
+    // ===== Mapa Leaflet =====
+    const map = L.map('map', { zoomControl: true, minZoom: 2 }).setView([29.066, -110.955], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const cluster = L.markerClusterGroup({
+      showCoverageOnHover:false,
+      spiderfyOnEveryZoom:false,
+      maxClusterRadius: 50
+    }).addTo(map);
+
+    let featureLayer = null; // GeoJSON layer
+    let featureList = [];    // Para la lista lateral
+
+    function featureToHTML(props={}){
+      // Construye una tabla bonita con todas las propiedades
+      const keys = Object.keys(props);
+      if(!keys.length) return '<em>Sin atributos</em>';
+      const rows = keys.map(k=>`<tr><td><strong>${escapeHtml(k)}</strong></td><td>${formatValue(props[k])}</td></tr>`).join('');
+      return `<div class="popup"><table>${rows}</table></div>`;
+    }
+
+    function formatValue(v){
+      if(v==null) return '';
+      const s = String(v);
+      // Link automático si parece URL
+      if(/^https?:\/\//i.test(s)) return `<a href="${s}" target="_blank" rel="noopener">${s}</a>`;
+      return escapeHtml(s);
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+    }
+
+    function clearData(){
+      cluster.clearLayers();
+      if(featureLayer){ map.removeLayer(featureLayer); featureLayer=null; }
+      featureList = [];
+      $('#list').innerHTML = '';
+      countEl.textContent = '0';
+    }
+
+    function indexFeatures(geojson){
+      featureList = [];
+      L.geoJSON(geojson, {
+        pointToLayer: (feat, latlng) => {
+          const name = feat.properties?.name || feat.properties?.Name || 'Bache sin nombre';
+          const desc = feat.properties?.description || feat.properties?.Description || '';
+
+          const m = L.marker(latlng, { title: name });
+          m.bindPopup(`<h4 style="margin:0 0 6px">${escapeHtml(name)}</h4>${featureToHTML(feat.properties)}`);
+          m._meta = { id: featureList.length, name, desc, latlng, props: feat.properties };
+          featureList.push(m);
+          return m;
+        }
+      });
+
+      // Agrega al clúster
+      featureList.forEach(m=> cluster.addLayer(m));
+
+      // Ajusta vista
+      const group = new L.featureGroup(featureList);
+      if(featureList.length){
+        try{ map.fitBounds(group.getBounds().pad(0.1)); }catch(e){ map.setView([29.066,-110.955],6); }
+      }
+
+      // Pinta lista
+      renderList();
+      countEl.textContent = String(featureList.length);
+    }
+
+    function renderList(filter=''){
+      const list = $('#list');
+      const q = filter.trim().toLowerCase();
+      const items = featureList.filter(m => {
+        if(!q) return true;
+        const s = (m._meta.name + ' ' + (m._meta.desc||'') + ' ' + JSON.stringify(m._meta.props||{})).toLowerCase();
+        return s.includes(q);
+      });
+      list.innerHTML = items.map(m => {
+        const { name, latlng } = m._meta;
+        return `<div class="item" data-id="${m._meta.id}">
+          <h4>${escapeHtml(name)}</h4>
+          <div class="muted">${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}</div>
+        </div>`
+      }).join('');
+
+      // Click en item
+      $$('#list .item').forEach(el => el.addEventListener('click', () => {
+        const id = +el.getAttribute('data-id');
+        const marker = featureList[id];
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), 17));
+        marker.openPopup();
+      }));
+    }
+
+    async function loadFromUrl(url){
+      if(!url) throw new Error('URL vacía');
+      setStatus('Cargando datos...');
+      clearData();
+      // Cache-buster para GitHub raw
+      const bust = url + (url.includes('?')?'&':'?') + '_=' + Date.now();
+
+      // Soporta KML y GeoJSON
+      if(/\.(kml|kmz)$/i.test(url)){
+        // Usamos omnivore para KML remoto
+        const kmlLayer = omnivore.kml(bust);
+        await new Promise((resolve,reject)=>{
+          kmlLayer.on('ready', ()=>resolve()).on('error', e=>reject(e));
+        });
+        const gj = kmlLayer.toGeoJSON();
+        indexFeatures(gj);
+      } else {
+        const res = await fetch(bust);
+        if(!res.ok) throw new Error('No se pudo descargar el archivo');
+        const gj = await res.json();
+        indexFeatures(gj);
+      }
+      setStatus('Datos cargados.');
+    }
+
+    async function loadFromFile(file){
+      if(!file) return;
+      setStatus('Importando archivo...');
+      clearData();
+      const buf = await file.arrayBuffer();
+      const ext = file.name.split('.').pop().toLowerCase();
+      if(ext==='kml' || ext==='kmz'){
+        // togeojson espera un Document XML para KML
+        const text = new TextDecoder().decode(buf);
+        const dom = new DOMParser().parseFromString(text, 'text/xml');
+        const gj = toGeoJSON.kml(dom);
+        indexFeatures(gj);
+      } else {
+        const text = new TextDecoder().decode(buf);
+        const gj = JSON.parse(text);
+        indexFeatures(gj);
+      }
+      setStatus('Archivo cargado.');
+    }
+
+    // ===== UI Events =====
+    $('#btnPickFile').addEventListener('click', ()=> $('#fileInput').click());
+    $('#fileInput').addEventListener('change', (e)=> loadFromFile(e.target.files[0]))
+    $('#btnLoadUrl').addEventListener('click', async ()=>{
+      const url = $('#dataUrl').value.trim();
+      if(!url) return alert('Pega la URL pública del KML/GeoJSON');
+      localStorage.setItem(storeKey, url);
+      try{ await loadFromUrl(url); }catch(err){ console.error(err); alert('Error al cargar: '+ err.message);}    
+    });
+    $('#btnRefresh').addEventListener('click', async ()=>{
+      const url = $('#dataUrl').value.trim() || localStorage.getItem(storeKey) || getParam('data');
+      if(!url) return alert('No hay URL de datos para actualizar.');
+      try{ await loadFromUrl(url); }catch(err){ console.error(err); alert('Error al actualizar: '+ err.message);} 
+    });
+    $('#search').addEventListener('input', (e)=> renderList(e.target.value));
+
+    // QR toggle
+    const qrPanel = $('#qrPanel');
+    const qr = new QRCode($('#qrcode'), { text: location.href, width: 180, height: 180 });
+    $('#btnQR').addEventListener('click', ()=>{
+      $('#qrcode').innerHTML = '';
+      new QRCode($('#qrcode'), { text: location.href, width: 180, height: 180 });
+      qrPanel.classList.toggle('open');
+    });
+
+    // ===== Inicio: intenta cargar por ?data= o último usado =====
+    (async function init(){
+      const urlParam = getParam('data');
+      const last = localStorage.getItem(storeKey);
+      const url = urlParam || last;
+      if(url){ $('#dataUrl').value = url; try{ await loadFromUrl(url);} catch(e){ console.warn(e);} }
+      else { setStatus('Pega la URL del KML o usa "KML local".'); }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Baches de prueba - Nogales</name>
+
+    <Schema name="Baches" id="schema_Baches">
+      <SimpleField type="string" name="Tipo"/>
+      <SimpleField type="string" name="Numero"/>
+      <SimpleField type="string" name="Ancho"/>
+      <SimpleField type="string" name="Largo"/>
+      <SimpleField type="string" name="Colonia"/>
+      <SimpleField type="string" name="Calle"/>
+      <SimpleField type="string" name="FotoAntes"/>
+    </Schema>
+
+    <!-- Bache 1 -->
+    <Placemark>
+      <name>Bache 1</name>
+      <description><![CDATA[
+        <center><table>
+        <tr><th>Campo</th><th>Valor</th></tr>
+        <tr><td>Tipo</td><td>Bache C</td></tr>
+        <tr><td>Numero</td><td>1</td></tr>
+        <tr><td>Ancho</td><td>1.2 m</td></tr>
+        <tr><td>Largo</td><td>1.8 m</td></tr>
+        <tr><td>Colonia</td><td>La Moderna</td></tr>
+        <tr><td>Calle</td><td>Calz de los Doctores</td></tr>
+        <tr><td>FotoAntes</td><td>https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Pothole_on_road.jpg/640px-Pothole_on_road.jpg</td></tr>
+        </table></center>
+      ]]></description>
+      <ExtendedData>
+        <SchemaData schemaUrl="#schema_Baches">
+          <SimpleData name="Tipo">Bache C</SimpleData>
+          <SimpleData name="Numero">1</SimpleData>
+          <SimpleData name="Ancho">1.2</SimpleData>
+          <SimpleData name="Largo">1.8</SimpleData>
+          <SimpleData name="Colonia">La Moderna</SimpleData>
+          <SimpleData name="Calle">Calz de los Doctores</SimpleData>
+          <SimpleData name="FotoAntes">https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/Pothole_on_road.jpg/640px-Pothole_on_road.jpg</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Point><coordinates>-110.941020,31.303837,0</coordinates></Point>
+    </Placemark>
+
+    <!-- Bache 2 -->
+    <Placemark>
+      <name>Bache 2</name>
+      <description><![CDATA[
+        <center><table>
+        <tr><th>Campo</th><th>Valor</th></tr>
+        <tr><td>Tipo</td><td>Bache B</td></tr>
+        <tr><td>Numero</td><td>2</td></tr>
+        <tr><td>Ancho</td><td>0.9 m</td></tr>
+        <tr><td>Largo</td><td>1.4 m</td></tr>
+        <tr><td>Colonia</td><td>Centro</td></tr>
+        <tr><td>Calle</td><td>Av. Obregón</td></tr>
+        <tr><td>FotoAntes</td><td>https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Street_pothole.jpg/640px-Street_pothole.jpg</td></tr>
+        </table></center>
+      ]]></description>
+      <ExtendedData>
+        <SchemaData schemaUrl="#schema_Baches">
+          <SimpleData name="Tipo">Bache B</SimpleData>
+          <SimpleData name="Numero">2</SimpleData>
+          <SimpleData name="Ancho">0.9</SimpleData>
+          <SimpleData name="Largo">1.4</SimpleData>
+          <SimpleData name="Colonia">Centro</SimpleData>
+          <SimpleData name="Calle">Av. Obregón</SimpleData>
+          <SimpleData name="FotoAntes">https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Street_pothole.jpg/640px-Street_pothole.jpg</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Point><coordinates>-110.934778,31.298369,0</coordinates></Point>
+    </Placemark>
+
+    <!-- Bache 3 -->
+    <Placemark>
+      <name>Bache 3</name>
+      <description><![CDATA[
+        <center><table>
+        <tr><th>Campo</th><th>Valor</th></tr>
+        <tr><td>Tipo</td><td>Bache A</td></tr>
+        <tr><td>Numero</td><td>3</td></tr>
+        <tr><td>Ancho</td><td>1.5 m</td></tr>
+        <tr><td>Largo</td><td>2.0 m</td></tr>
+        <tr><td>Colonia</td><td>San Miguel</td></tr>
+        <tr><td>Calle</td><td>Calle Kennedy</td></tr>
+        <tr><td>FotoAntes</td><td>https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Pothole_example.jpg/640px-Pothole_example.jpg</td></tr>
+        </table></center>
+      ]]></description>
+      <ExtendedData>
+        <SchemaData schemaUrl="#schema_Baches">
+          <SimpleData name="Tipo">Bache A</SimpleData>
+          <SimpleData name="Numero">3</SimpleData>
+          <SimpleData name="Ancho">1.5</SimpleData>
+          <SimpleData name="Largo">2.0</SimpleData>
+          <SimpleData name="Colonia">San Miguel</SimpleData>
+          <SimpleData name="Calle">Calle Kennedy</SimpleData>
+          <SimpleData name="FotoAntes">https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/Pothole_example.jpg/640px-Pothole_example.jpg</SimpleData>
+        </SchemaData>
+      </ExtendedData>
+      <Point><coordinates>-110.935081,31.284687,0</coordinates></Point>
+    </Placemark>
+
+  </Document>
+</kml>

@@ -1,0 +1,362 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EZ Street MX · Mapa de Bacheo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  :root{--bg:#0b1220;--panel:#0f172a;--text:#e5e7eb;--sub:#94a3b8;--border:#223046;--accent:#4f46e5}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  #layout{position:fixed;inset:0;display:grid;grid-template-columns:320px 1fr 360px;grid-template-rows:auto 1fr;transition:grid-template-columns .2s ease}
+  header{grid-column:1/4;display:flex;gap:8px;align-items:center;padding:8px 10px;background:#0b1220;border-bottom:1px solid var(--border)}
+  .title{font-weight:700;color:#c7d2fe;margin-right:auto;white-space:nowrap}
+  .btn{background:#0b1220;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;cursor:pointer}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .inp{background:#0b1220;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 10px;min-width:260px}
+  #left{position:relative;border-right:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+  #leftHandle{position:absolute;right:-10px;top:50%;transform:translateY(-50%);width:20px;height:80px;background:#0b1220;border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;color:#e5e7eb;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4000;opacity:.9}
+  #leftHandle:hover{opacity:1}
+  #list{overflow:auto}
+  .item{padding:10px 12px;border-bottom:1px solid #0b1220;cursor:pointer}
+  .item:hover{background:#0b162a}
+  .item small{display:block;color:var(--sub)}
+  #map{width:100%;height:100%}
+  #right{border-left:1px solid var(--border);background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+  #info{padding:12px;overflow:auto}
+  .h{font-weight:700;margin:8px 0 6px 0}
+  .kv{margin:4px 0;color:var(--sub)}
+  .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .thumbs a img{width:108px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--border)}
+  .chips{display:flex;gap:6px;margin-top:8px}
+  .chip{background:#0b1220;border:1px solid var(--border);padding:4px 8px;border-radius:999px;font-size:12px;color:var(--sub)}
+  .sec{padding:10px;border-bottom:1px solid #0b1220}
+  .muted{color:var(--sub)}
+  .left-collapsed #layout{grid-template-columns:0 1fr 360px}
+  .left-collapsed #left{display:none}
+  .right-collapsed #layout{grid-template-columns:320px 1fr 0}
+  .right-collapsed #right{display:none}
+  .float-btn{position:fixed;top:64px;z-index:5000;background:#0b1220;border:1px solid var(--border);color:#e5e7eb;border-radius:8px;padding:8px 10px;cursor:pointer}
+  #openLeft{left:8px;display:none}
+  #openRight{right:8px;display:none}
+  .left-collapsed #openLeft{display:block}
+  .right-collapsed #openRight{display:block}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:#111827;color:#fff;border:1px solid #374151;border-radius:10px;padding:10px 14px;z-index:6000;box-shadow:0 10px 30px rgba(0,0,0,.35);max-width:90vw}
+  .loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(11,18,32,.55);backdrop-filter:blur(2px);z-index:3500;display:none}
+  .spinner{width:36px;height:36px;border:3px solid #94a3b8;border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @media (max-width: 900px){
+    #layout{grid-template-columns:0 1fr 0} /* móvil: oculta lista/panel por defecto */
+    #left{display:none}
+    .left-collapsed #openLeft{display:block}
+  }
+</style>
+</head>
+<body>
+<div id="layout">
+  <header>
+    <button id="toggleLeft" class="btn" title="Mostrar/ocultar lista">☰ Lista</button>
+    <div class="title">EZ Street MX · Mapa de Bacheo</div>
+    <input id="inUrl" class="inp" placeholder="URL del KML (por defecto: baches.kml)">
+    <button id="btnUrl" class="btn primary">Cargar URL</button>
+    <label class="btn">KML local<input id="file" type="file" accept=".kml,.kmz" style="display:none"></label>
+    <button id="btnReload" class="btn">Actualizar</button>
+    <button id="toggleRight" class="btn" title="Mostrar/ocultar panel">ℹ️ Panel</button>
+  </header>
+
+  <aside id="left">
+    <div id="leftHandle" title="Ocultar lista">⟨</div>
+    <div class="sec">
+      <input id="q" class="inp" placeholder="Buscar bache…">
+      <div class="chips">
+        <span class="chip" id="countChip">Listo: 0</span>
+        <span class="chip" id="srcChip"></span>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;color:var(--sub)">
+        <input type="checkbox" id="autoHideChk"> Ocultar lista al seleccionar
+      </label>
+    </div>
+    <div id="list"></div>
+  </aside>
+
+  <div id="map" style="position:relative">
+    <div id="loader" class="loader"><div class="spinner"></div></div>
+  </div>
+
+  <aside id="right">
+    <div class="sec muted" id="hint">Selecciona un bache del mapa o de la lista</div>
+    <div id="info"></div>
+  </aside>
+</div>
+
+<button id="openLeft" class="float-btn">▶ Lista</button>
+<button id="openRight" class="float-btn">Panel ◀</button>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+// ---------- util UI ----------
+const LS = window.localStorage;
+const toastBox = document.getElementById('toast');
+function toast(msg, ms=3500){ toastBox.textContent=msg; toastBox.style.display='block'; setTimeout(()=>toastBox.style.display='none', ms); }
+function setCollapsed(which, v){
+  const cls = which==='left' ? 'left-collapsed' : 'right-collapsed';
+  document.body.classList.toggle(cls, v);
+  LS.setItem('collapse:'+which, v?'1':'0');
+  setTimeout(()=>map.invalidateSize(), 210);
+}
+function restoreCollapsed(){
+  setCollapsed('left',  LS.getItem('collapse:left')==='1');
+  setCollapsed('right', LS.getItem('collapse:right')==='1');
+  autoHideLeft = LS.getItem('autoHideLeft')==='1';
+  document.getElementById('autoHideChk').checked = autoHideLeft;
+}
+document.getElementById('toggleLeft').onclick = ()=> setCollapsed('left', !document.body.classList.contains('left-collapsed'));
+document.getElementById('toggleRight').onclick= ()=> setCollapsed('right',!document.body.classList.contains('right-collapsed'));
+document.getElementById('openLeft').onclick  = ()=> setCollapsed('left', false);
+document.getElementById('openRight').onclick = ()=> setCollapsed('right', false);
+document.getElementById('leftHandle').onclick = ()=> setCollapsed('left', true);
+let autoHideLeft=false;
+document.getElementById('autoHideChk').addEventListener('change', e=>{
+  autoHideLeft = e.target.checked;
+  LS.setItem('autoHideLeft', autoHideLeft ? '1':'0');
+});
+
+// ---------- mapa y capas ----------
+const map = L.map('map', {preferCanvas:true}).setView([31.303,-110.94], 13);
+const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19});
+const osm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:20, subdomains:'abc'});
+let baseAdded=false;
+function addBaseLayers(){
+  if(baseAdded) return; baseAdded=true;
+  esri.on('tileerror', ()=>{
+    if(!map.hasLayer(osm)){ osm.addTo(map); toast('Satélite bloqueado en tu red; usando Calles (OSM).', 5000); }
+  });
+  osm.on('tileerror', ()=> toast('No se pudo cargar Calles (OSM). Revisa conexión.', 5000));
+  esri.addTo(map);
+  L.control.layers({'Satélite':esri,'Calles (OSM)':osm}).addTo(map);
+}
+addBaseLayers();
+
+// ---------- estado dataset ----------
+const qs = new URLSearchParams(location.search);
+let currentURL = qs.get('data') || LS.getItem('kml:url') || 'baches.kml';
+document.getElementById('inUrl').value = currentURL;
+if(qs.get('v')==='osm'){ esri.remove(); osm.addTo(map); }
+
+let features = [];
+let cluster = L.markerClusterGroup({showCoverageOnHover:false, disableClusteringAtZoom:18, maxClusterRadius:40});
+let lines = L.featureGroup();
+let polys = L.featureGroup();
+cluster.addTo(map); lines.addTo(map); polys.addTo(map);
+
+function resetLayers(){ cluster.clearLayers(); lines.clearLayers(); polys.clearLayers(); }
+
+// ---------- KML/KMZ robusto ----------
+async function kmzToText(file){
+  // si el archivo es KMZ local, usa JSZip mínima desde CDN
+  if(typeof JSZip==='undefined'){
+    await new Promise(r=>{
+      const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; s.onload=r; document.body.appendChild(s);
+    });
+  }
+  const zip = await JSZip.loadAsync(file);
+  // busca el primer .kml dentro del KMZ
+  const kmlEntry = Object.keys(zip.files).find(n=>/\.kml$/i.test(n));
+  if(!kmlEntry) throw new Error('KMZ sin .kml interno');
+  return await zip.files[kmlEntry].async('string');
+}
+
+function parseKml(txt){
+  const feats=[]; let id=0;
+  const placemarks = txt.match(/<Placemark[\s\S]*?<\/Placemark>/gi) || [];
+  for(const block of placemarks){
+    const p={};
+    // SimpleData (Trimble)
+    block.replace(/<SimpleData[^>]*name="([^"]+)"[^>]*>([\s\S]*?)<\/SimpleData>/gi,(a,n,v)=>{p[n]=v.replace(/<[^>]*>/g,'').trim();});
+    // description <table> (Trimble)
+    const desc = block.match(/<description>([\s\S]*?)<\/description>/i);
+    if(desc){
+      const html = desc[1].replace(/<!\[CDATA\[|\]\]>/g,'');
+      const kv = [...html.matchAll(/<tr[^>]*>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<\/tr>/gi)];
+      for(const m of kv){
+        const k = m[1].replace(/<[^>]*>/g,'').trim();
+        const v = m[2].replace(/<[^>]*>/g,'').trim();
+        if(k) p[k]=v;
+      }
+    }
+    const nm = block.match(/<name>([\s\S]*?)<\/name>/i); if(nm) p.name = nm[1].trim();
+    // Point(s)
+    const pts = block.match(/<Point>[\s\S]*?<\/Point>/gi) || [];
+    for(const pt of pts){
+      const m = pt.match(/<coordinates>([^<]+)<\/coordinates>/i);
+      if(m){
+        const a=m[1].trim().split(',').map(Number);
+        if(a.length>=2 && isFinite(a[0]) && isFinite(a[1])) feats.push({id:++id,t:'Point',c:[a[1],a[0]],p});
+      }
+    }
+    // LineStrings
+    const lns = block.match(/<LineString>[\s\S]*?<\/LineString>/gi) || [];
+    for(const ln of lns){
+      const m = ln.match(/<coordinates>([^<]+)<\/coordinates>/i);
+      if(m){
+        const arr = m[1].trim().split(/\s+/).map(s=>s.split(',').map(Number))
+          .filter(a=>a.length>=2 && isFinite(a[0]) && isFinite(a[1]))
+          .map(a=>[a[1],a[0]]);
+        if(arr.length>1) feats.push({id:++id,t:'Line',c:arr,p});
+      }
+    }
+    // Polygons
+    const polyBlocks = block.match(/<Polygon>[\s\S]*?<\/Polygon>/gi) || [];
+    for(const pg of polyBlocks){
+      const m = pg.match(/<outerBoundaryIs>[\s\S]*?<LinearRing>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/LinearRing>[\s\S]*?<\/outerBoundaryIs>/i);
+      if(m){
+        const arr = m[1].trim().split(/\s+/).map(s=>s.split(',').map(Number))
+          .filter(a=>a.length>=2 && isFinite(a[0]) && isFinite(a[1]))
+          .map(a=>[a[1],a[0]]);
+        if(arr.length>2) feats.push({id:++id,t:'Poly',c:[arr],p});
+      }
+    }
+  }
+  // centers
+  for(const f of feats){
+    try{
+      if(f.t==='Point') f.center=f.c;
+      else{
+        const lyr = f.t==='Line' ? L.polyline(f.c) : L.polygon(f.c);
+        const b = lyr.getBounds(); if(b && b.isValid()) f.center = b.getCenter();
+      }
+    }catch(_){}
+  }
+  return feats;
+}
+
+// ---------- render ----------
+function field(p, names){ for(const n of names){ if(p[n]) return p[n]; } return ''; }
+function photosFromProps(p){
+  const keys=['Fotoantes','FotoAntes','fotoantes','Foto Referencia','FotoReferencia','Foto Final','FotoFinal'];
+  const out=[]; 
+  // también busca urls en cualquier campo
+  for(const k in p){ const v=String(p[k]||''); const m=v.match(/https?:\/\/[^\s"'<>\)]+/g); if(m) out.push(...m); }
+  // limpia duplicados
+  return [...new Set(out.filter(u=>/\.(jpg|jpeg|png|webp)(\?|$)/i.test(u)||/forms\/images\//.test(u)))].slice(0,12);
+}
+function showPanel(f){
+  const p=f.p||{};
+  const tipo=field(p,['TipodeTrabajo','Tipo','tipo']);
+  const ancho=field(p,['Ancho','ancho']); const largo=field(p,['Largo','largo']);
+  const colonia=field(p,['Colonia','colonia']); const calle=field(p,['Calle','calle']);
+  const fotos=photosFromProps(p);
+  const hasC = f.center && isFinite(f.center.lat) && isFinite(f.center.lng);
+  const coord = hasC ? (f.center.lat.toFixed(6)+', '+f.center.lng.toFixed(6)) : '';
+  const mapBtn = hasC ? `<a class="btn" target="_blank" href="https://www.google.com/maps?q=${f.center.lat},${f.center.lng}">Ver en Maps</a>` : '';
+  document.getElementById('hint').style.display='none';
+  document.getElementById('info').innerHTML=`
+    <div class="h">${p.name||'Bache'}</div>
+    ${tipo?`<div class="kv"><b>Tipo:</b> ${tipo}</div>`:''}
+    ${ancho?`<div class="kv"><b>Ancho:</b> ${ancho}</div>`:''}
+    ${largo?`<div class="kv"><b>Largo:</b> ${largo}</div>`:''}
+    ${colonia?`<div class="kv"><b>Colonia:</b> ${colonia}</div>`:''}
+    ${calle?`<div class="kv"><b>Calle:</b> ${calle}</div>`:''}
+    ${coord?`<div class="kv"><b>Coord:</b> ${coord}</div>`:''}
+    ${fotos.length?`<div class="h">Fotos</div><div class="thumbs">${fotos.map(u=>`<a href="${u}" target="_blank"><img src="${u}"></a>`).join('')}</div>`:''}
+    <div class="h"></div>${mapBtn}
+  `;
+  setCollapsed('right', false);
+  if(autoHideLeft) setCollapsed('left', true);
+}
+function buildList(){
+  const box=document.getElementById('list'); box.innerHTML='';
+  const q=document.getElementById('q').value.trim().toLowerCase();
+  const data=!q?features:features.filter(f=>{
+    const p=f.p||{}; const hay=(p.name||'')+' '+(p.Calle||'')+' '+(p.Colonia||'')+' '+JSON.stringify(p);
+    return hay.toLowerCase().includes(q);
+  });
+  for(const f of data){
+    const p=f.p||{}; const it=document.createElement('div'); it.className='item';
+    const hasC = f.center && isFinite(f.center.lat) && isFinite(f.center.lng);
+    const subtitle = hasC ? (f.center.lat.toFixed(6)+', '+f.center.lng.toFixed(6)) : (f.t||' ');
+    it.innerHTML=`<div>${p.name||('kml_'+f.id)}</div><small>${subtitle}</small>`;
+    it.onclick=()=>{ showPanel(f); if(hasC) map.setView(f.center, 19); };
+    box.appendChild(it);
+  }
+  document.getElementById('countChip').textContent='Listo: '+features.length;
+}
+function draw(){
+  resetLayers();
+  for(const f of features){
+    if(f.t==='Point'){
+      const m=L.marker(f.c).on('click',()=>showPanel(f));
+      cluster.addLayer(m);
+    }else if(f.t==='Line'){
+      L.polyline(f.c,{color:'#38bdf8',weight:6,opacity:.85}).on('click',()=>showPanel(f)).addTo(lines);
+    }else if(f.t==='Poly'){
+      L.polygon(f.c,{color:'#22c55e',weight:2,fillOpacity:.25}).on('click',()=>showPanel(f)).addTo(polys);
+    }
+  }
+  try{
+    const g=L.featureGroup([cluster,lines,polys]);
+    const b=g.getBounds(); if(b && b.isValid()) map.fitBounds(b.pad(.15));
+  }catch(_){}
+  buildList();
+}
+
+// ---------- carga ----------
+const loader=document.getElementById('loader');
+async function loadURL(u){
+  try{
+    loader.style.display='flex';
+    document.getElementById('srcChip').textContent = u ? (u.length>40?('…'+u.slice(-40)):u) : '';
+    const url = u+(u.includes('?')?'&':'?')+'t='+(Date.now());
+    const res=await fetch(url);
+    if(!res.ok) throw new Error('HTTP '+res.status+': '+res.statusText);
+    let txt='', type=res.headers.get('content-type')||'';
+    if(/application\/zip|kmz/i.test(type) || /\.kmz(\?|$)/i.test(u)){
+      const blob=await res.blob(); txt = await kmzToText(blob);
+    }else{
+      txt=await res.text();
+    }
+    features=parseKml(txt);
+    if(!features.length){
+      toast('KML cargado pero sin Placemarks válidos. Revisa el archivo.');
+    }
+    draw();
+  }catch(e){
+    console.error('[KML]', e);
+    toast('No se pudo cargar el KML: '+e.message, 6000);
+  }finally{
+    loader.style.display='none';
+  }
+}
+
+document.getElementById('btnUrl').onclick=()=>{
+  const u=document.getElementById('inUrl').value.trim();
+  if(u){ currentURL=u; localStorage.setItem('kml:url',u); loadURL(currentURL); }
+};
+document.getElementById('btnReload').onclick=()=> loadURL(currentURL);
+document.getElementById('file').addEventListener('change',async ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  try{
+    loader.style.display='flex';
+    let txt='';
+    if(/\.kmz$/i.test(f.name)){ txt = await kmzToText(f); } else { txt = await f.text(); }
+    features=parseKml(txt); draw();
+    toast('KML local cargado (solo visible en tu navegador)');
+  }catch(e){ console.error(e); toast('Error con el archivo local: '+e.message); }
+  finally{ loader.style.display='none'; }
+});
+
+document.getElementById('q').addEventListener('input', buildList);
+
+// restaurar estado y cargar
+restoreCollapsed();
+const qpref = qs.get('q'); if(qpref){ document.getElementById('q').value=qpref; }
+loadURL(currentURL);
+</script>
+</body>
+</html>

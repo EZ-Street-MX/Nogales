@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EZ Street MX · Mapa de Bacheo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  :root{
+    --bg:#0f172a;         /* slate-900 */
+    --panel:#111827;      /* gray-900 */
+    --panel2:#0b1220;     /* darker */
+    --card:#0b1325;
+    --muted:#9ca3af;      /* gray-400 */
+    --text:#e5e7eb;       /* gray-200 */
+    --accent:#60a5fa;     /* blue-400 */
+    --danger:#ef4444;     /* red-500 */
+  }
+  *{box-sizing:border-box}
+  html,body,#app{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue","Noto Sans",sans-serif}
+  a{color:#a5b4fc;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .topbar{
+    position:fixed; inset:0 0 auto 0; height:58px;
+    display:flex; align-items:center; gap:.75rem;
+    padding:.5rem .75rem; background:linear-gradient(180deg,rgba(8,13,24,.95),rgba(8,13,24,.75));
+    z-index:900;
+    backdrop-filter:saturate(140%) blur(8px);
+    border-bottom:1px solid rgba(148,163,184,.15);
+  }
+  .title{font-weight:700; letter-spacing:.2px; white-space:nowrap}
+  .input, .btn{
+    border-radius:.6rem; border:1px solid rgba(148,163,184,.2); background:var(--panel);
+    color:var(--text); height:40px; padding:.4rem .7rem; outline:none;
+  }
+  .btn{cursor:pointer}
+  .btn:hover{border-color:rgba(148,163,184,.35)}
+  #map{position:absolute; inset:58px 0 0 0}
+  .drawer{
+    position:fixed; top:58px; bottom:0;
+    width:340px; background:var(--panel2); border-right:1px solid rgba(148,163,184,.15);
+    transform:translateX(-100%); transition:transform .25s ease; z-index:800;
+    display:flex; flex-direction:column;
+  }
+  .drawer.show{transform:translateX(0)}
+  .drawer header{
+    padding:.6rem .8rem; display:flex; gap:.5rem; align-items:center; border-bottom:1px solid rgba(148,163,184,.15);
+    font-weight:600;
+  }
+  .drawer .list{overflow:auto; padding:.25rem .25rem 1rem}
+  .list .item{
+    padding:.6rem .7rem; border-radius:.6rem; margin:.25rem; background:transparent; border:1px solid transparent; cursor:pointer;
+  }
+  .list .item:hover{background:rgba(148,163,184,.06); border-color:rgba(148,163,184,.12)}
+  .list .meta{font-size:.85rem; color:var(--muted)}
+  /* Detail panel */
+  .detail{
+    position:fixed; top:58px; right:0; bottom:0; width:420px; z-index:850;
+    background:var(--panel2); border-left:1px solid rgba(148,163,184,.15);
+    transform:translateX(100%); transition:transform .25s ease; display:flex; flex-direction:column;
+  }
+  .detail.show{transform:translateX(0)}
+  .detail header{padding:.6rem .8rem; border-bottom:1px solid rgba(148,163,184,.15); display:flex; align-items:center; justify-content:space-between; gap:.5rem}
+  .detail .content{padding: .8rem; overflow:auto}
+  .grid-photos{display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; margin-bottom:1rem}
+  .ph{
+    width:100%; aspect-ratio:4/3; background:#0a0f1d; border:1px dashed rgba(148,163,184,.18); border-radius:.6rem; overflow:hidden; display:flex; align-items:center; justify-content:center;
+  }
+  .ph img{width:100%; height:100%; object-fit:cover; display:block}
+  .card{background:var(--card); border:1px solid rgba(148,163,184,.15); border-radius:.8rem; padding:.8rem}
+  .row{display:grid; grid-template-columns: 140px 1fr; gap:.6rem; padding:.35rem 0; border-bottom:1px dashed rgba(148,163,184,.12)}
+  .row:last-child{border-bottom:none}
+  .label{color:var(--muted)}
+  .floating{
+    position:fixed; bottom:18px; z-index:880; display:flex; gap:.6rem;
+  }
+  .floating .chip{
+    background:rgba(15,23,42,.82); border:1px solid rgba(148,163,184,.2); padding:.5rem .9rem; border-radius:999px; cursor:pointer; user-select:none;
+  }
+  .left{left:14px} .right{right:14px}
+  /* Red circle marker */
+  .red-dot{
+    background:rgba(239,68,68,.9); border:2px solid white; width:12px; height:12px; border-radius:50%;
+    box-shadow:0 0 0 2px rgba(239,68,68,.35), 0 0 20px rgba(239,68,68,.25);
+  }
+  /* Mobile */
+  @media (max-width: 900px){
+    #map{inset:106px 0 0 0}
+    .topbar{height:106px; align-items:flex-start; gap:.75rem; padding:.6rem .75rem; flex-wrap:wrap}
+    .title{width:100%}
+    .drawer{width:86vw}
+    .detail{width:100%; right:0; left:0; height:30vh; top:auto; bottom:0; border-left:none; border-top:1px solid rgba(148,163,184,.15); transform:translateY(100%)}
+    .detail.show{transform:translateY(0)}
+    .detail .content{padding:.7rem}
+    .grid-photos{grid-template-columns:repeat(3, 1fr)}
+    .floating{bottom:124px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div class="title">EZ Street MX · Mapa de Bacheo</div>
+    <input id="kmlUrl" class="input" style="min-width:260px; flex:1" placeholder="KML (por defecto: baches.kml)" />
+    <button id="btnLoad" class="btn">Cargar</button>
+    <label class="btn" style="display:inline-flex; align-items:center; gap:.5rem; cursor:pointer">
+      <input id="fileKml" type="file" accept=".kml,.kmz" style="display:none">
+      <span>KML local</span>
+    </label>
+    <button id="btnRefresh" class="btn">Actualizar</button>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Left Drawer: list -->
+  <aside id="drawer" class="drawer">
+    <header>
+      <strong>Lista</strong>
+      <div style="margin-left:auto"></div>
+      <button id="closeDrawer" class="btn">Cerrar</button>
+    </header>
+    <div class="list" id="list"></div>
+  </aside>
+
+  <!-- Detail panel -->
+  <aside id="detail" class="detail">
+    <header>
+      <div id="featureTitle" style="font-weight:700">—</div>
+      <a id="mapsLink" href="#" target="_blank" class="btn" style="white-space:nowrap">Ver en Maps</a>
+      <button id="closeDetail" class="btn">Cerrar</button>
+    </header>
+    <div class="content">
+      <div class="grid-photos">
+        <div class="ph"><img id="ph1" alt="Foto 1" /></div>
+        <div class="ph"><img id="ph2" alt="Foto 2" /></div>
+        <div class="ph"><img id="ph3" alt="Foto 3" /></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="label">Ancho</div><div id="fAncho">—</div></div>
+        <div class="row"><div class="label">Largo</div><div id="fLargo">—</div></div>
+        <div class="row"><div class="label">Tipo</div><div id="fTipo">—</div></div>
+        <div class="row"><div class="label"># Bache</div><div id="fNum">—</div></div>
+        <div class="row"><div class="label">Cadenamiento</div><div id="fCad">—</div></div>
+        <div class="row"><div class="label">Colonia</div><div id="fColonia">—</div></div>
+        <div class="row"><div class="label">Calle</div><div id="fCalle">—</div></div>
+        <div class="row"><div class="label">Entre calles</div><div id="fEntre">—</div></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Floating toggle buttons -->
+  <div class="floating left">
+    <div id="toggleDrawer" class="chip">Lista</div>
+  </div>
+  <div class="floating right">
+    <div id="toggleDetail" class="chip">Panel</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/@mapbox/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+<script>
+(function(){
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+  // Map
+  const map = L.map('map', {
+    scrollWheelZoom: true,
+    touchZoom: true,
+    doubleClickZoom: true,
+    zoomControl: !isMobile, // we'll add it bottom-right later for mobile
+    attributionControl: true
+  });
+
+  // Basemap (ESRI World Imagery)
+  const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxNativeZoom: 19, maxZoom: 22, attribution: '&copy; Esri'
+  }).addTo(map);
+
+  if (isMobile) {
+    L.control.zoom({position:'bottomright'}).addTo(map);
+  }
+
+  map.setView([31.300, -110.940], 14);
+
+  // Cluster layer
+  const cluster = L.markerClusterGroup({ disableClusteringAtZoom: 18, spiderfyOnMaxZoom: false });
+  map.addLayer(cluster);
+
+  let currentLayer = null;
+  const listEl = document.getElementById('list');
+
+  // Panels
+  const drawer = document.getElementById('drawer');
+  const detail = document.getElementById('detail');
+  const toggleDrawer = document.getElementById('toggleDrawer');
+  const toggleDetail = document.getElementById('toggleDetail');
+  const closeDrawer = document.getElementById('closeDrawer');
+  const closeDetail = document.getElementById('closeDetail');
+
+  toggleDrawer.onclick = () => drawer.classList.toggle('show');
+  closeDrawer.onclick = () => drawer.classList.remove('show');
+  toggleDetail.onclick = () => detail.classList.toggle('show');
+  closeDetail.onclick = () => detail.classList.remove('show');
+
+  // Utilities
+  function clearLayer() {
+    cluster.clearLayers();
+    if (currentLayer) { try{ map.removeLayer(currentLayer);}catch(e){} currentLayer=null; }
+    listEl.innerHTML='';
+  }
+
+  function parsePhotosFromDescription(desc){
+    try{
+      const doc = new DOMParser().parseFromString(desc, 'text/html');
+      const urls = [];
+      // prefer <a href>, then <img src>
+      doc.querySelectorAll('a[href], img[src]').forEach(el=>{
+        const u = el.getAttribute('href') || el.getAttribute('src');
+        if (!u) return;
+        if (/^https?:\/\//i.test(u)) urls.push(u);
+      });
+      return [...new Set(urls)].slice(0,3);
+    }catch(e){ return []; }
+  }
+
+  function setImgWithFallback(imgEl, url){
+    if (!url){ imgEl.src=''; imgEl.alt='—'; imgEl.style.opacity=.35; return; }
+    imgEl.style.opacity=1;
+    imgEl.src = url;
+    imgEl.onerror = ()=>{
+      const prox = 'https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//,'').replace(/^\/\//,''));
+      imgEl.onerror = ()=>{ imgEl.style.opacity=.35; imgEl.alt='(no disponible)'; };
+      imgEl.src = prox;
+    };
+  }
+
+  function fmt(x){
+    if (x==null || x==='') return null;
+    const s = String(x).trim();
+    if (!s || s==='—' || s==='_') return null;
+    return s;
+  }
+
+  function fillDetail(props, latlng){
+    document.getElementById('featureTitle').textContent = props.name || props.id || 'Baches';
+    const q = encodeURIComponent((latlng.lat||0).toFixed(6)+','+(latlng.lng||0).toFixed(6));
+    const maps = 'https://www.google.com/maps?q='+q;
+    document.getElementById('mapsLink').href = maps;
+
+    const photos = [];
+    if (props.description) photos.push(...parsePhotosFromDescription(props.description));
+    ['Fotoantes','FotoReferencia','FotoFinal','Foto antes','Foto referencia','Foto final'].forEach(k=>{
+      if (props[k]) photos.push(props[k]);
+    });
+    const p = (i)=>photos[i]||'';
+    setImgWithFallback(document.getElementById('ph1'), p(0));
+    setImgWithFallback(document.getElementById('ph2'), p(1));
+    setImgWithFallback(document.getElementById('ph3'), p(2));
+
+    function put(id, val){
+      const el = document.getElementById(id);
+      const v = fmt(val);
+      el.textContent = v ?? '—';
+      const row = el.closest('.row');
+      row.style.display = v ? 'grid' : 'none';
+    }
+    put('fAncho', props.Ancho || props.ancho);
+    put('fLargo', props.Largo || props.largo);
+    put('fTipo', props['Tipo deTrabajo'] || props.Tipo || props['Tipo'] || props['Tipo de Trabajo']);
+    put('fNum', props['Numero deBache'] || props.NumBache || props['# Bache']);
+    put('fCad', props.Cadenamiento || props['Cadenamiento'] || props.cadenamiento);
+    put('fColonia', props.Colonia || props.colonia);
+    put('fCalle', props.Calle || props.calle);
+    put('fEntre', props['Entre calles'] || props.EntreCalles || props.entrecalles);
+
+    detail.classList.add('show');
+  }
+
+  // Create red circle marker, attach click
+  function createMarker(latlng, props){
+    const m = L.marker(latlng, {
+      icon: L.divIcon({className:'', html:'<div class="red-dot"></div>', iconSize:[14,14], iconAnchor:[7,7]})
+    });
+    m.on('click', ()=> fillDetail(props, latlng));
+    return m;
+  }
+
+  // Add features from GeoJSON (converted by omnivore)
+  function addFeatures(geojson){
+    const feats = (geojson && geojson.features) ? geojson.features : [];
+    feats.forEach((f,i)=>{
+      const c = f.geometry && f.geometry.coordinates;
+      if (!c) return;
+      const latlng = L.latLng(c[1], c[0]);
+      const props = Object.assign({}, f.properties||{});
+      const marker = createMarker(latlng, props);
+      cluster.addLayer(marker);
+
+      // Add to list
+      const it = document.createElement('div');
+      it.className='item';
+      it.innerHTML = '<div style="font-weight:600">'+(props.name||'kml_'+(i+1))+'</div>' +
+                     '<div class="meta">'+ latlng.lat.toFixed(6)+', '+latlng.lng.toFixed(6) + (props.Calle?(' · '+props.Calle):'') +'</div>';
+      it.onclick = ()=>{
+        map.setView(latlng, Math.max(map.getZoom(), 19), {animate:true});
+        fillDetail(props, latlng);
+        if (isMobile) drawer.classList.remove('show');
+      };
+      listEl.appendChild(it);
+    });
+
+    try{
+      const b = L.geoJSON(geojson);
+      map.fitBounds(b.getBounds().pad(0.2));
+    }catch(e){}
+  }
+
+  function loadKmlUrl(url){
+    clearLayer();
+    const k = omnivore.kml(url);
+    k.on('ready', function(){
+      const gj = this.toGeoJSON();
+      addFeatures(gj);
+      currentLayer = this; // not added to map to avoid default pins
+    }).on('error', function(){
+      alert('No se pudo cargar el KML. Revisa el enlace.');
+    });
+    // Importante: NO .addTo(map) -> evita los pins azules por defecto
+  }
+
+  // Inputs
+  const kmlInput = document.getElementById('kmlUrl');
+  const btnLoad = document.getElementById('btnLoad');
+  const btnRefresh = document.getElementById('btnRefresh');
+  const fileKml = document.getElementById('fileKml');
+
+  // URL param ?data=
+  const params = new URLSearchParams(location.search);
+  const qData = params.get('data') || params.get('kml');
+  const defaultKml = 'baches.kml';
+  kmlInput.value = qData ? qData : defaultKml;
+  loadKmlUrl(kmlInput.value);
+
+  btnLoad.onclick = ()=>{
+    if (!kmlInput.value.trim()) return;
+    loadKmlUrl(kmlInput.value.trim());
+  };
+  btnRefresh.onclick = ()=>{
+    if (currentLayer){
+      const last = kmlInput.value.trim() || defaultKml;
+      loadKmlUrl(last + (last.includes('?')?'&':'?') + 't=' + Date.now());
+    }
+  };
+  fileKml.addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    kmlInput.value = '(archivo local)';
+    loadKmlUrl(url);
+  });
+
+  window.__baches_map__ = { map, cluster, loadKmlUrl };
+})();
+</script>
+
+<script>
+// Mobile-only: click on detail images opens them in a new tab (no desktop changes)
+(function(){
+  if (!window.matchMedia || !window.matchMedia('(max-width: 900px)').matches) return;
+  function bind() {
+    ['ph1','ph2','ph3'].forEach(function(id){
+      var img = document.getElementById(id);
+      if(!img || img.dataset._boundOpen) return;
+      img.dataset._boundOpen = '1';
+      img.style.cursor = 'pointer';
+      img.addEventListener('click', function(){
+        var u = img.getAttribute('data-original') || img.src;
+        if (u) window.open(u, '_blank', 'noopener');
+      });
+    });
+  }
+  // try now and on DOM changes (panel updates)
+  bind();
+  var mo = new MutationObserver(bind);
+  mo.observe(document.body, {subtree:true, childList:true, attributes:false});
+})();
+</script>
+
+</body>
+</html>

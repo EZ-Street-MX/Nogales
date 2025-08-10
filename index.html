@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>EZ Street MX · Mapa de Bacheo</title>
+
+  <!-- Leaflet + MarkerCluster + Esri basemap -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
+
+  <!-- KML -> GeoJSON -->
+  <script src="https://unpkg.com/@tmcw/togeojson@5.6.0/dist/togeojson.umd.js"></script>
+
+  <style>
+    :root{
+      --bg:#0f172a;      /* panel bg */
+      --panel:#0b1225;   /* panel darker */
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --accent:#22d3ee;
+    }
+    html,body{height:100%;margin:0;background:#0b1225;color:var(--text);}
+    .app{display:grid;grid-template-columns:1fr 360px;height:100%;}
+    #map{width:100%;height:100%;}
+    .panel{
+      background:var(--bg);
+      border-left:1px solid #1f2937;
+      display:flex;flex-direction:column;
+      min-width:280px; max-width:480px;
+    }
+    .panel header{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:.8rem 1rem;border-bottom:1px solid #1f2937;background:var(--panel);
+    }
+    .brand{font-weight:700;gap:.5rem;display:flex;align-items:center}
+    .brand .dot{width:.6rem;height:.6rem;background:var(--accent);border-radius:999px;display:inline-block}
+    .kmlChip{font-size:.85rem;background:#111827;border:1px solid #1f2937;padding:.25rem .5rem;border-radius:8px;color:#a5b4fc}
+    .content{padding:1rem;overflow:auto}
+    .field{margin:.5rem 0}
+    .label{font-size:.8rem;color:var(--muted);margin-bottom:.25rem}
+    .value{font-weight:600}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .photos{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .photo{
+      width:100%;aspect-ratio:4/3;background:#0b1225;border:1px solid #1f2937;
+      border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;
+    }
+    .photo img{width:100%;height:100%;object-fit:cover}
+    .empty{color:#64748b;font-size:.85rem}
+    .cluster-custom{
+      background:#def;border:2px solid #38bdf8;color:#0c4a6e;
+    }
+    /* Red dot markers */
+    .dot{
+      width:10px;height:10px;background:#ef4444;border:2px solid white;border-radius:999px;box-shadow:0 0 0 1px #ef4444;
+    }
+    /* Mobile */
+    @media (max-width: 980px){
+      .app{grid-template-columns:1fr}
+      .panel{
+        position:fixed;right:0;top:0;bottom:0;width:min(94vw,420px);
+        transform:translateX(100%);transition:.25s ease;
+        box-shadow:-12px 0 24px rgba(0,0,0,.35);z-index:9999
+      }
+      .panel.open{transform:translateX(0)}
+      .togglePanel{
+        position:fixed;right:12px;top:12px;z-index:9998;
+        background:rgba(0,0,0,.55);backdrop-filter:blur(6px);
+        color:white;border:1px solid #1f2937;border-radius:10px;padding:.5rem .8rem;
+      }
+    }
+    .controls{
+      position:fixed;left:12px;top:12px;z-index:9998;display:flex;gap:.5rem;align-items:center
+    }
+    .chip{
+      background:rgba(0,0,0,.55);color:#e5e7eb;border:1px solid #1f2937;border-radius:999px;padding:.35rem .7rem;font-size:.85rem
+    }
+    .btn{cursor:pointer}
+    a{color:#22d3ee;text-decoration:none}
+    a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div id="map"></div>
+
+    <aside class="panel" id="panel">
+      <header>
+        <div class="brand"><span class="dot"></span> EZ Street MX · Mapa de Bacheo</div>
+        <div class="kmlChip" id="kmlChip">baches.kml</div>
+      </header>
+      <div class="content" id="content">
+        <div class="empty">Selecciona un bache del mapa.</div>
+      </div>
+    </aside>
+  </div>
+
+  <button class="togglePanel btn" id="toggle" aria-label="Abrir panel" title="Abrir panel">Panel</button>
+
+<script>
+(function(){
+  const qs = new URLSearchParams(location.search);
+  const DEFAULT_KML = 'baches.kml';
+  const dataParam = qs.get('data');
+  const kmlUrl = dataParam ? decodeURIComponent(dataParam) : DEFAULT_KML;
+  document.getElementById('kmlChip').textContent = kmlUrl.split('/').pop();
+
+  // Map
+  const map = L.map('map', {
+    zoomControl:false, // limpio en móvil
+    maxZoom: 22,
+    minZoom: 3
+  }).setView([31.304, -110.94], 14);
+
+  // ESRI World Imagery (satélite nítido)
+  const imagery = L.esri.basemapLayer('Imagery');
+  imagery.addTo(map);
+  // Rótulos opcionales: comentar si no se desean
+  // const labels = L.esri.basemapLayer('ImageryLabels').addTo(map);
+
+  // Botón Panel (solo visible en móvil)
+  const panel = document.getElementById('panel');
+  const toggle = document.getElementById('toggle');
+  const openPanel = () => panel.classList.add('open');
+  const closePanel = () => panel.classList.remove('open');
+  toggle.addEventListener('click', () => {
+    panel.classList.toggle('open');
+  });
+
+  // Marker cluster (aunque usamos puntos, agrupa para rendimiento)
+  const cluster = L.markerClusterGroup({
+    disableClusteringAtZoom: 19,
+    spiderfyOnMaxZoom: false,
+    maxClusterRadius: 48,
+  });
+  map.addLayer(cluster);
+
+  // Ayuda: crea un "marcador" visual de punto rojo
+  function dotMarker(latlng){
+    return L.marker(latlng, {
+      icon: L.divIcon({className:'dot', html:'', iconSize:[14,14], iconAnchor:[7,7]})
+    });
+  }
+
+  // Render detalle a la derecha
+  function showDetail(p){
+    const el = document.getElementById('content');
+    // helpers
+    const getV = k => (p && p[k] != null && String(p[k]).trim() !== '') ? String(p[k]) : '';
+    const foto = (k) => {
+      let v = getV(k);
+      // a veces llegan dentro de <a href="...">...</a>
+      const hrefMatch = v.match(/href\s*=\s*["']([^"']+)["']/i);
+      if (hrefMatch) v = hrefMatch[1];
+      // si no es URL http(s), intenta descubrirlo en "description"
+      if (!/^https?:\/\//i.test(v) && p.description){
+        const re = new RegExp(k.replace(/_/g,'.*?') + '.*?href=["\']([^"\']+)["\']','i');
+        const m = p.description.match(re);
+        if (m) v = m[1];
+      }
+      return /^https?:\/\//i.test(v) ? v : '';
+    };
+
+    const html = `
+      <div class="field"><div class="label">ID</div><div class="value">${getV('name') || getV('Nombre') || getV('id') || '-'}</div></div>
+      <div class="two">
+        <div class="field"><div class="label">Ancho</div><div class="value">${getV('Ancho') || getV('ancho') || '-'}</div></div>
+        <div class="field"><div class="label">Largo</div><div class="value">${getV('Largo') || getV('largo') || '-'}</div></div>
+      </div>
+
+      <div class="field"><div class="label">Fotos</div>
+        <div class="photos">
+          <div class="photo">${ foto('Fotoantes') ? `<a href="${foto('Fotoantes')}" target="_blank" rel="noopener"><img src="${foto('Fotoantes')}" alt="Foto antes"></a>` : '<span class="empty">Sin foto</span>' }</div>
+          <div class="photo">${ foto('FotoReferencia') ? `<a href="${foto('FotoReferencia')}" target="_blank" rel="noopener"><img src="${foto('FotoReferencia')}" alt="Foto referencia"></a>` : '<span class="empty">Sin foto</span>' }</div>
+          <div class="photo">${ foto('Fotofinal') ? `<a href="${foto('Fotofinal')}" target="_blank" rel="noopener"><img src="${foto('Fotofinal')}" alt="Foto final"></a>` : '<span class="empty">Sin foto</span>' }</div>
+        </div>
+      </div>
+
+      <div class="field"><div class="label">Cadenamiento</div><div class="value">${getV('Cadenamiento') || '-'}</div></div>
+      <div class="field"><div class="label">Colonia</div><div class="value">${getV('Colonia') || '-'}</div></div>
+      <div class="field"><div class="label">Calle</div><div class="value">${getV('Calle') || '-'}</div></div>
+      <div class="field"><div class="label">Entre calles</div><div class="value">${getV('EntreCalles') || getV('Entre_calles') || '-'}</div></div>
+    `;
+    el.innerHTML = html;
+    // abre panel automáticamente en móvil
+    openPanel();
+  }
+
+  function featurePropertiesFromKmlPlacemark(placemark){
+    // togeojson ya convierte ExtendedData/SimpleData a propiedades planas.
+    // Pero mantenemos "description" por si vienen las fotos incrustadas como <a href>.
+    const props = placemark.properties || {};
+    if (!props.description && placemark.properties && placemark.properties.description){
+      props.description = placemark.properties.description;
+    }
+    return props;
+  }
+
+  async function loadKml(url){
+    const resp = await fetch(url, {cache:'no-store'});
+    if(!resp.ok) throw new Error('No se pudo descargar el KML: '+resp.status);
+    const text = await resp.text();
+    const xml = (new DOMParser()).parseFromString(text, 'text/xml');
+    const gj = toGeoJSON.kml(xml);
+
+    cluster.clearLayers();
+    const bounds = [];
+    gj.features.forEach(f => {
+      if(!f.geometry || f.geometry.type !== 'Point') return;
+      const [lng,lat] = f.geometry.coordinates;
+      const m = dotMarker([lat,lng]);
+      const p = featurePropertiesFromKmlPlacemark(f);
+      m.on('click', () => showDetail(p));
+      cluster.addLayer(m);
+      bounds.push([lat,lng]);
+    });
+    if(bounds.length){
+      map.fitBounds(bounds, {maxZoom: 18, padding:[40,40]});
+    }
+  }
+
+  loadKml(kmlUrl).catch(err => {
+    console.error(err);
+    document.getElementById('content').innerHTML = '<div class="empty">No se pudo cargar el KML.</div>';
+  });
+
+})();
+</script>
+</body>
+</html>

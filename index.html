@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>EZ Street MX · Mapa de Bacheo</title>
+
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- MarkerCluster -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<style>
+:root{
+  --bg:#0f172a;
+  --panel:#111827;
+  --text:#e5e7eb;
+  --muted:#9ca3af;
+  --accent:#60a5fa;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif}
+#app{display:grid;grid-template-rows:auto 1fr; height:100%}
+
+/* TOPBAR */
+.topbar{
+  display:flex;align-items:center;gap:.5rem;
+  padding:.5rem .75rem;border-bottom:1px solid #1f2937;background:#0b1220;flex-wrap:wrap
+}
+.topbar h1{font-size:1rem;margin:.25rem .5rem .25rem 0;white-space:nowrap}
+.topbar .spacer{flex:1}
+.input, .btn{height:36px;border-radius:10px;border:1px solid #1f2937;background:#0e1728;color:var(--text)}
+.input{padding:0 .6rem;min-width:260px}
+.btn{padding:0 .75rem;cursor:pointer}
+.btn:hover{border-color:#344257}
+.badge{padding:.3rem .6rem;border-radius:999px;background:#111827;border:1px solid #1f2937}
+
+/* LAYOUT */
+.main{position:relative;display:grid;grid-template-columns:1fr 380px;gap:0;height:100%}
+#map{width:100%;height:100%}
+
+/* PANEL */
+#panel{background:var(--panel);border-left:1px solid #1f2937;display:flex;flex-direction:column}
+#panel header{display:flex;align-items:center;justify-content:space-between;padding:.75rem .85rem;border-bottom:1px solid #1f2937}
+#panel .content{overflow:auto;padding:.75rem .9rem}
+#panel .row{margin:.4rem 0;display:flex;gap:.4rem;align-items:flex-start}
+#panel .k{min-width:110px;color:var(--muted)}
+#panel a{color:#93c5fd;text-decoration:none}
+#panel a:hover{text-decoration:underline}
+.thumbgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin:.5rem 0}
+.thumbgrid a img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:.4rem;border:1px solid #1f2937}
+h3{margin:.3rem 0 .2rem 0;font-size:1.05rem}
+
+/* MOBILE */
+@media (max-width:900px){
+  .input{min-width:180px}
+  .main{grid-template-columns:1fr}
+  #panel{position:absolute;inset:auto 0 0 0;height:55%;transform:translateY(100%);transition:transform .25s}
+  #panel.open{transform:translateY(0)}
+  #panel header{cursor:grab}
+  .topbar .spacer{display:none}
+}
+/* Leaflet tweaks */
+.leaflet-container{background:#0b1220}
+.leaflet-control-zoom{display:none} /* sin botones + / - */
+.marker-dot{
+  width:10px;height:10px;background:#ef4444;border:2px solid white;border-radius:50%;
+  box-shadow:0 0 0 1px #0006;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <span class="badge">Lista</span>
+    <h1>EZ Street MX · Mapa de Bacheo</h1>
+    <input id="kmlUrl" class="input" type="text" placeholder="URL del KML (por defecto: baches.kml)">
+    <button id="btnLoadUrl" class="btn">Cargar URL</button>
+    <input id="kmlFile" type="file" accept=".kml,.kmz" hidden>
+    <button id="btnLocal" class="btn">KML local</button>
+    <div class="spacer"></div>
+    <span id="currentSrc" class="badge">baches.kml</span>
+    <button id="btnPanel" class="btn">Panel</button>
+  </div>
+
+  <div class="main">
+    <div id="map"></div>
+    <aside id="panel">
+      <header>
+        <div id="panelTitle">Selecciona un bache del mapa</div>
+        <a id="mapsLink" href="#" target="_blank" rel="noopener" style="display:none">Ver en Maps</a>
+      </header>
+      <div class="content" id="panelContent">
+        <div class="row"><span class="k">Tip:</span><span>Toca un punto rojo para ver su información.</span></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* ---------- Utils ----------- */
+const $ = (s)=>document.querySelector(s);
+const params = new URLSearchParams(location.search);
+function cacheBust(url){
+  const t = params.get('t') || Date.now();
+  const u = new URL(url, location.href);
+  u.searchParams.set('t', t);
+  return u.toString();
+}
+function niceKey(k){
+  return k.replace(/_/g,' ').replace(/([a-z])([A-Z])/g,'$1 $2')
+          .replace(/^./,c=>c.toUpperCase());
+}
+function extractTableDescription(html){
+  const map = {};
+  try{
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    tmp.querySelectorAll('tr').forEach(tr=>{
+      const th = tr.querySelector('th'); const td = tr.querySelector('td');
+      if(th && td){ map[th.textContent.trim()] = td.textContent.trim(); }
+    });
+  }catch(e){/* ignore */}
+  return map;
+}
+function extractImageLinks(html){
+  const arr=[];
+  try{
+    const tmp = document.createElement('div'); tmp.innerHTML = html;
+    tmp.querySelectorAll('img').forEach(img=>arr.push(img.src));
+    tmp.querySelectorAll('a').forEach(a=>{
+      const href=a.getAttribute('href')||'';
+      if(/\.(jpg|jpeg|png|webp)(\?|$)/i.test(href)) arr.push(href);
+      if(/forms\/images/.test(href)) arr.push(href);
+    });
+  }catch(e){}
+  // Deduplicate
+  return [...new Set(arr)];
+}
+
+/* ---------- KML parser (light) ----------- */
+function parseKML(text){
+  const out=[];
+  const xml = new DOMParser().parseFromString(text,'text/xml');
+  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+  placemarks.forEach(pm=>{
+    const name = (pm.getElementsByTagName('name')[0]?.textContent || '').trim();
+    const descNode = pm.getElementsByTagName('description')[0];
+    const descHtml = descNode ? descNode.textContent : '';
+    const point = pm.getElementsByTagName('Point')[0];
+    if(!point) return; // solo puntos
+    const coordTxt = (point.getElementsByTagName('coordinates')[0]?.textContent || '').trim();
+    const [lon,lat] = coordTxt.split(',').map(v=>parseFloat(v));
+    if(!isFinite(lat)||!isFinite(lon)) return;
+
+    // Props de ExtendedData/SimpleData
+    const props = {};
+    pm.querySelectorAll('ExtendedData, SchemaData, SimpleData').forEach(n=>{
+      if(n.tagName==='SimpleData'){
+        const k = n.getAttribute('name') || ''; const v = n.textContent.trim();
+        if(k) props[k] = v;
+      }
+    });
+    // Props de tabla en description
+    const tableProps = extractTableDescription(descHtml);
+    Object.assign(props, tableProps);
+
+    // Fotos por propiedades que contengan "foto"
+    const fotos = [];
+    Object.entries(props).forEach(([k,v])=>{
+      if(/foto/i.test(k) && /^https?:/i.test(v)) fotos.push(v);
+    });
+    // Fotos embebidas
+    extractImageLinks(descHtml).forEach(u=>fotos.push(u));
+
+    out.push({name, lat, lon, props, fotos});
+  });
+  return out;
+}
+
+/* ---------- Mapa ----------- */
+const map = L.map('map', { zoomControl:false, minZoom: 2, maxZoom: 22, preferCanvas:true });
+const streets = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  maxZoom: 22, attribution:'© OpenStreetMap'
+}).addTo(map);
+const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  maxZoom: 22, attribution:'Tiles © Esri'
+});
+const layers = {"Calles":streets,"Satélite":sat};
+L.control.layers(layers, null, {position:'bottomright'}).addTo(map);
+
+const cluster = L.markerClusterGroup({disableClusteringAtZoom: 19, spiderfyOnMaxZoom:true});
+cluster.addTo(map);
+
+let features = [];
+
+function makeDot(lat,lon){
+  // Usamos un DivIcon para rendimiento
+  const icon = L.divIcon({className:'marker-dot', iconSize:[10,10]});
+  return L.marker([lat,lon], {icon});
+}
+
+function populateMap(feats){
+  cluster.clearLayers();
+  const group = [];
+  feats.forEach(f=>{
+    const m = makeDot(f.lat,f.lon);
+    m.featureData = f;
+    m.on('click', ()=> showInfo(f));
+    cluster.addLayer(m);
+    group.push(m);
+  });
+  if(group.length){
+    const g = L.featureGroup(group);
+    map.fitBounds(g.getBounds().pad(0.2));
+  }else{
+    map.setView([31.3,-110.95], 12);
+  }
+}
+
+/* ---------- Panel ----------- */
+function showInfo(f){
+  $('#panelTitle').textContent = f.name || 'Bache';
+  const mapsUrl = `https://maps.google.com/?q=${f.lat.toFixed(6)},${f.lon.toFixed(6)}`;
+  const ml = $('#mapsLink'); ml.href = mapsUrl; ml.style.display='inline';
+
+  const cont = $('#panelContent'); cont.innerHTML='';
+  const keysOrder = ["TipodeTrabajo","NumerodeBache","Ancho","Largo","Cadenamiento","Colonia","Calle","EntreCalles","Collector","Createdon"];
+  const rendered = new Set();
+
+  keysOrder.forEach(k=>{
+    // Buscar por clave exacta o variaciones (insensible a may/min)
+    const key = Object.keys(f.props).find(x=>x.toLowerCase()===k.toLowerCase());
+    if(key){
+      cont.insertAdjacentHTML('beforeend', `<div class="row"><div class="k">${niceKey(key)}:</div><div>${(f.props[key]||'').toString()}</div></div>`);
+      rendered.add(key);
+    }
+  });
+  // Resto de propiedades útiles
+  Object.entries(f.props).forEach(([k,v])=>{
+    if(rendered.has(k)) return;
+    if(/(name|id|workspace|schema|displayname)/i.test(k)) return;
+    if(String(v).trim()==='') return;
+    cont.insertAdjacentHTML('beforeend', `<div class="row"><div class="k">${niceKey(k)}:</div><div>${v}</div></div>`);
+  });
+
+  if(f.fotos && f.fotos.length){
+    cont.insertAdjacentHTML('beforeend','<h3>Fotos</h3>');
+    const grid = document.createElement('div'); grid.className='thumbgrid';
+    f.fotos.slice(0,6).forEach(u=>{
+      const a = document.createElement('a'); a.href=u; a.target='_blank'; a.rel='noopener';
+      const img = document.createElement('img'); img.loading='lazy'; img.src=u;
+      a.appendChild(img); grid.appendChild(a);
+    });
+    cont.appendChild(grid);
+  }
+  // Abrir panel en móvil
+  openPanel(true);
+}
+
+function openPanel(open){
+  const p = $('#panel');
+  if(matchMedia('(max-width:900px)').matches){
+    p.classList.toggle('open', !!open);
+  }
+}
+
+/* ---------- Carga de KML ----------- */
+async function loadFromURL(url){
+  try{
+    $('#currentSrc').textContent = trimUrl(url);
+    const res = await fetch(cacheBust(url));
+    if(!res.ok) throw new Error('Error HTTP ' + res.status);
+    const txt = await res.text();
+    features = parseKML(txt);
+    populateMap(features);
+  }catch(err){
+    alert('No se pudo cargar el KML: ' + err.message);
+  }
+}
+function trimUrl(u){
+  try{ const x = new URL(u, location.href); return x.pathname.split('/').pop(); }catch{ return u; }
+}
+function loadFromFile(file){
+  $('#currentSrc').textContent = file.name;
+  const fr = new FileReader();
+  fr.onload = ()=>{
+    features = parseKML(String(fr.result));
+    populateMap(features);
+  };
+  fr.readAsText(file);
+}
+
+/* ---------- Eventos UI ----------- */
+$('#btnLocal').addEventListener('click', ()=> $('#kmlFile').click());
+$('#kmlFile').addEventListener('change', ev=>{
+  const f = ev.target.files?.[0]; if(f) loadFromFile(f);
+});
+$('#btnLoadUrl').addEventListener('click', ()=>{
+  const url = $('#kmlUrl').value.trim() || 'baches.kml';
+  loadFromURL(url);
+});
+$('#btnPanel').addEventListener('click', ()=> openPanel());
+
+// Arrastrar archivo al mapa (opcional)
+document.addEventListener('dragover', e=>e.preventDefault());
+document.addEventListener('drop', e=>{
+  e.preventDefault();
+  const f = e.dataTransfer?.files?.[0];
+  if(f && /\.(kml|kmz)$/i.test(f.name)) loadFromFile(f);
+});
+
+/* ---------- Inicio ----------- */
+const start = params.get('data') || 'baches.kml';
+$('#kmlUrl').value = start;
+loadFromURL(start);
+
+// Panel deslizable en móvil al tocar cabecera
+$('#panel').querySelector('header').addEventListener('click', ()=> openPanel(true));
+</script>
+</body>
+</html>

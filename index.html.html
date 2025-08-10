@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EZ Street MX | Mapa de Bacheo</title>
+  <meta name="description" content="Visualizador de baches con KML/GeoJSON: lista, búsqueda, detalle con fotos estilo Trimble." />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    :root{ --bg:#0b1220; --panel:#0f172a; --panel-2:#111827; --text:#e5e7eb; --muted:#94a3b8; --brand:#00a0e3; --accent:#22d3ee; --ok:#34d399; --warn:#f59e0b; }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .app{display:grid;grid-template-rows:auto 1fr; height:100%}
+    header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;background:#0d1726;border-bottom:1px solid rgba(255,255,255,.06)}
+    .controls{display:flex;flex-wrap:wrap; gap:8px; align-items:center}
+    input[type="url"]{background:var(--panel-2); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:8px 10px; border-radius:10px; min-width:280px}
+    .btn{background:#15223a; color:var(--text); border:1px solid rgba(255,255,255,.12); padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600}
+    .btn:hover{background:#1b2b4b}
+    .layout{display:grid; grid-template-columns: 320px 1fr 360px; height:100%;}
+    .sidebar{background:var(--panel); border-right:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; min-width:0}
+    .side-head{padding:12px; border-bottom:1px solid rgba(255,255,255,.06);}
+    .search{width:100%; background:var(--panel-2); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:9px 12px; border-radius:10px}
+    .list{overflow:auto}
+    .item{padding:12px; border-bottom:1px dashed rgba(255,255,255,.06); cursor:pointer}
+    .item:hover{background:rgba(255,255,255,.04)}
+    .item h4{margin:0 0 6px; font-size:14px}
+    .item .muted{color:var(--muted); font-size:12px}
+    #map{height:100%; width:100%}
+    .leaflet-container{background:#0b1220}
+    .detail{background:var(--panel); border-left:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column; min-width:0}
+    .detail-head{display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid rgba(255,255,255,.06)}
+    .detail-body{padding:12px; overflow:auto}
+    .field{display:grid; grid-template-columns: 120px 1fr; gap:8px; padding:6px 0; border-bottom:1px dashed rgba(255,255,255,.06)}
+    .field b{color:#cbd5e1}
+    .gallery{display:grid; grid-template-columns: repeat(2,1fr); gap:8px; margin-top:8px}
+    .thumb{width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:10px; border:1px solid rgba(255,255,255,.08); cursor:pointer}
+    .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:rgba(34,211,238,.15); color:#67e8f9; border:1px solid rgba(34,211,238,.3)}
+    .section{margin-top:10px; background:rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06); border-radius:12px}
+    .section h4{margin:0; padding:10px 12px; cursor:pointer; display:flex; justify-content:space-between; align-items:center}
+    .section-content{padding:8px 12px; display:block}
+    .hidden{display:none}
+    .footer{padding:8px 12px; border-top:1px solid rgba(255,255,255,.06); color:var(--muted); font-size:12px; display:flex; gap:10px; justify-content:space-between}
+    .toast{position:fixed;left:50%;top:12px;transform:translateX(-50%);background:#111827;color:#fff;border:1px solid rgba(255,255,255,.12);padding:8px 12px;border-radius:10px;z-index:2000;display:none}
+    .toast.show{display:block}
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:3000}
+    .modal.open{display:flex}
+    .modal img{max-width:90vw; max-height:90vh; border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.6)}
+    @media (max-width:1100px){ .layout{grid-template-columns: 1fr 1fr} .sidebar{display:none} .detail{display:none} }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div style="font-weight:700">EZ Street MX · Mapa de Bacheo</div>
+      <div class="controls">
+        <input id="dataUrl" type="url" placeholder="URL pública del KML/GeoJSON (RAW de GitHub, etc.)" />
+        <button class="btn" id="btnLoadUrl">Cargar URL</button>
+        <input id="fileInput" type="file" accept=".kml,.kmz,.geojson,.json" hidden>
+        <button class="btn" id="btnPickFile">KML local</button>
+        <button class="btn" id="btnRefresh">Actualizar</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="side-head">
+          <input id="search" class="search" type="text" placeholder="Buscar bache..." />
+        </div>
+        <div id="list" class="list"></div>
+        <div class="footer">
+          <span id="status">Listo.</span>
+          <span class="badge" id="count">0</span>
+        </div>
+      </aside>
+      <main id="map"></main>
+      <aside class="detail" id="detail">
+        <div class="detail-head">
+          <div>
+            <div id="d-title" style="font-weight:700">Selecciona un bache</div>
+            <div id="d-sub" class="badge" style="margin-top:6px">—</div>
+          </div>
+          <div><a id="d-gmaps" href="#" target="_blank" rel="noopener" class="btn">Ver en Maps</a></div>
+        </div>
+        <div class="detail-body">
+          <div id="d-fields"></div>
+          <div class="section">
+            <h4 data-toggle="#d-gallery">Fotos <span id="d-gcount" class="badge">0</span></h4>
+            <div id="d-gallery" class="section-content"><em>Sin fotos</em></div>
+          </div>
+          <div class="section">
+            <h4 data-toggle="#d-raw">Detalles brutos</h4>
+            <div id="d-raw" class="section-content"><em>—</em></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <div class="modal" id="modal"><img id="modal-img" alt="foto"/></div>
+
+  <!-- Libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/@mapbox/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+
+  <script>
+    const $ = (s,p=document)=>p.querySelector(s);
+    const $$ = (s,p=document)=>Array.from(p.querySelectorAll(s));
+    const statusEl = $('#status'); const countEl = $('#count'); const toast = $('#toast');
+    const storeKey = 'ezstreet_baches_data_url';
+    const getParam = k => new URLSearchParams(location.search).get(k);
+    const showToast = msg => { toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 2500); };
+
+    // Mapa
+    const map = L.map('map', { minZoom: 2 }).setView([31.307, -110.948], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap' }).addTo(map);
+    const cluster = L.markerClusterGroup({ showCoverageOnHover:false, spiderfyOnEveryZoom:false, maxClusterRadius:50 }).addTo(map);
+
+    let markers = [];
+    function clearData(){ cluster.clearLayers(); markers=[]; $('#list').innerHTML=''; countEl.textContent='0'; statusEl.textContent='Listo.'; }
+
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+    function autoLink(s){ return s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>'); }
+
+    function extractImages(html){
+      try{ const div = document.createElement('div'); div.innerHTML = html;
+        const imgs = Array.from(div.querySelectorAll('img')).map(img => img.getAttribute('src')).filter(Boolean);
+        const urls = (div.textContent||'').match(/https?:\/\/\S+\.(?:jpg|jpeg|png|webp|gif)/gi) || [];
+        return Array.from(new Set([...imgs, ...urls]));
+      }catch(e){ return []; }
+    }
+
+    function buildFields(props){
+      const keys = Object.keys(props||{});
+      if(!keys.length) return '<em>Sin atributos</em>';
+      const labels = {
+        'Tipo de Trabajo':'Tipo de Trabajo','Numero de Bache':'Número de Bache','Ancho':'Ancho','Largo':'Largo','Profundidad':'Profundidad','Estado':'Estado','Cuadrilla':'Cuadrilla'
+      };
+      let html = '';
+      for(const k of keys){
+        const v = props[k];
+        if(v==null || String(v).length===0) continue;
+        const label = labels[k] || k;
+        let val = String(v);
+        if(/^https?:\/\//i.test(val)) val = `<a href="${val}" target="_blank" rel="noopener">${val}</a>`;
+        html += `<div class="field"><b>${escapeHtml(label)}</b><div>${val}</div></div>`;
+      }
+      return html || '<em>Sin atributos</em>';
+    }
+
+    function setDetail(marker){
+      if(!marker) return;
+      const p = marker._meta.props || {};
+      const name = marker._meta.name || 'Bache';
+      $('#d-title').textContent = name;
+      $('#d-sub').textContent = `${marker._meta.latlng.lat.toFixed(6)}, ${marker._meta.latlng.lng.toFixed(6)}`;
+      $('#d-gmaps').href = `https://www.google.com/maps?q=${marker._meta.latlng.lat},${marker._meta.latlng.lng}`;
+
+      let raw = '';
+      if(p.description) raw = String(p.description);
+      else if(p.Description) raw = String(p.Description);
+      $('#d-raw').innerHTML = raw ? autoLink(raw) : '<em>—</em>';
+
+      $('#d-fields').innerHTML = buildFields(p);
+
+      const imgs = extractImages(raw).slice(0,12);
+      const g = $('#d-gallery');
+      $('#d-gcount').textContent = imgs.length;
+      g.innerHTML = imgs.length ? imgs.map(u=>`<img class="thumb" src="${u}" alt="foto" data-src="${u}"/>`).join('') : '<em>Sin fotos</em>';
+      $$('#d-gallery .thumb').forEach(img=> img.onclick = ()=>{ $('#modal-img').src = img.dataset.src; $('#modal').classList.add('open'); });
+    }
+
+    $('#modal').onclick = ()=> $('#modal').classList.remove('open');
+    $$('.section h4').forEach(h=> h.onclick = ()=>{ const id = h.getAttribute('data-toggle'); const el = document.querySelector(id); if(el) el.classList.toggle('hidden'); });
+
+    function indexMarkers(layer){
+      clearData();
+      const temp = [];
+      layer.eachLayer(l=>{ if(l.getLatLng){
+        const name = l.feature?.properties?.name || l.feature?.properties?.Name || 'Bache';
+        l.bindPopup(`<b>${escapeHtml(name)}</b>`);
+        l._meta = { name, latlng: l.getLatLng(), props: l.feature?.properties || {} };
+        temp.push(l);
+      }});
+      temp.forEach(m => cluster.addLayer(m));
+      markers = temp;
+      if(markers.length){ try{ map.fitBounds(L.featureGroup(markers).getBounds().pad(0.15)); }catch(e){} }
+      $('#list').innerHTML = markers.map((m,i)=>`<div class="item" data-i="${i}"><h4>${escapeHtml(m._meta.name)}</h4><div class="muted">${m._meta.latlng.lat.toFixed(6)}, ${m._meta.latlng.lng.toFixed(6)}</div></div>`).join('');
+      $$('#list .item').forEach(el=> el.onclick = ()=>{ const i = +el.dataset.i; const mk = markers[i]; setDetail(mk); map.setView(mk.getLatLng(), Math.max(map.getZoom(), 17)); mk.openPopup(); });
+      countEl.textContent = String(markers.length);
+      statusEl.textContent = 'Datos cargados.';
+    }
+
+    async function loadFromUrl(url){
+      try{
+        statusEl.textContent = 'Cargando datos...';
+        const bust = url + (url.includes('?')?'&':'?') + '_=' + Date.now();
+        if(/\.(kml|kmz)$/i.test(url)){
+          const kml = omnivore.kml(bust).on('ready', function(){ indexMarkers(kml); })
+                                       .on('error', function(e){ console.error(e); showToast('Error leyendo KML'); statusEl.textContent='Error.'; });
+        } else {
+          const res = await fetch(bust);
+          const gj = await res.json();
+          const layer = L.geoJSON(gj);
+          indexMarkers(layer);
+        }
+      }catch(err){ console.error(err); showToast('No se pudo cargar la URL'); statusEl.textContent='Error.'; }
+    }
+
+    async function loadLocalFile(file){
+      statusEl.textContent = 'Importando archivo...';
+      const ext = file.name.split('.').pop().toLowerCase();
+      const blobUrl = URL.createObjectURL(file);
+      try{
+        if(ext==='kml' || ext==='kmz'){
+          const layer = omnivore.kml(blobUrl).on('ready', function(){ indexMarkers(layer); })
+                                            .on('error', function(e){ console.error(e); showToast('KML inválido'); statusEl.textContent='Error.'; });
+        } else {
+          const text = await file.text();
+          const gj = JSON.parse(text);
+          const layer = L.geoJSON(gj);
+          indexMarkers(layer);
+        }
+      }catch(err){ console.error(err); showToast('No se pudo importar'); statusEl.textContent='Error.'; }
+      finally{ URL.revokeObjectURL(blobUrl); }
+    }
+
+    // Eventos UI
+    $('#btnPickFile').onclick = ()=> $('#fileInput').click();
+    $('#fileInput').onchange = e => e.target.files[0] && loadLocalFile(e.target.files[0]);
+    $('#btnLoadUrl').onclick = ()=> { const u=$('#dataUrl').value.trim(); if(!u){ showToast('Pega la URL pública'); return; } localStorage.setItem(storeKey,u); loadFromUrl(u); };
+    $('#btnRefresh').onclick = ()=> { const u=$('#dataUrl').value.trim() || localStorage.getItem(storeKey) || getParam('data') || 'https://raw.githubusercontent.com/gerardo0503/Nogales/main/baches_nogales_clean_20250810-000525.kml'; loadFromUrl(u); };
+    $('#search').oninput = e => {
+      const q = e.target.value.trim().toLowerCase();
+      $$('#list .item').forEach(el=> { const t = el.querySelector('h4').textContent.toLowerCase(); el.style.display = t.includes(q)?'block':'none'; });
+    };
+
+    // Autocarga por ?data= o KML por defecto
+    (function init(){
+      const url = getParam('data') || 'https://raw.githubusercontent.com/gerardo0503/Nogales/main/baches_nogales_clean_20250810-000525.kml';
+      $('#dataUrl').value = url; loadFromUrl(url);
+    })();
+  </script>
+</body>
+</html>

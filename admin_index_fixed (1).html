@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publicar KML a GitHub → baches.kml</title>
+<style>
+  :root{
+    --bg:#0b1220; --panel:#121a2b; --muted:#93a0b4; --txt:#e6edf3;
+    --brand:#3b82f6; --ok:#22c55e; --err:#ef4444; --warn:#f59e0b;
+    --input:#0f1729; --border:#21304c;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; padding:32px; font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;
+    background: radial-gradient(1200px 1200px at 10% -10%, #172038 0%, transparent 60%) , var(--bg);
+    color:var(--txt);
+  }
+  h1{font-size:clamp(20px,2.4vw,28px);margin:0 0 18px 0}
+  .wrap{max-width:980px;margin-inline:auto}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px; overflow:hidden}
+  .head{padding:22px 24px;border-bottom:1px solid var(--border); display:flex;align-items:center;gap:12px}
+  .head span{color:var(--muted)}
+  form{display:grid; gap:14px; padding:18px}
+  label{font-weight:600; color:#cbd5e1}
+  .row{display:grid; gap:10px}
+  .row.inline{grid-template-columns: 1fr 160px 1fr; gap:12px}
+  .row.inline2{grid-template-columns: 1fr 1fr 1fr; gap:12px}
+  input[type=text], input[type=password]{
+    width:100%; padding:12px 12px; border:1px solid var(--border); border-radius:10px;
+    background:var(--input); color:var(--txt); outline:none;
+  }
+  input[type=file]{width:100%; padding:10px;background:var(--input); border:1px dashed var(--border); border-radius:10px; color:var(--muted)}
+  .btns{display:flex; gap:10px; flex-wrap:wrap}
+  button,.btn{
+    padding:10px 14px; border-radius:10px; border:1px solid transparent; cursor:pointer; font-weight:600;
+    background:var(--brand); color:#fff;
+  }
+  .btn.ghost{background:transparent;border-color:var(--border); color:var(--txt)}
+  .btn.raw{background:transparent;border-color:#58627a;color:#a7b3c8}
+  .notice{font-size:13px; color:var(--muted); padding:0 18px 12px}
+  #log{height:220px; width:100%; background: #0a1220; border:1px solid var(--border); border-radius:10px;
+       padding:12px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+       color:#d1e3ff; overflow:auto; white-space:pre-wrap}
+  .ok{color:var(--ok)} .err{color:var(--err)} .warn{color:var(--warn)} .muted{color:var(--muted)}
+  .mini{font-size:12px; color:var(--muted)}
+  .grid{display:grid; gap:10px}
+  .kbd{padding:2px 6px; border:1px solid var(--border); border-radius:6px; background:#0b1326; color:#9fb1c7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head">
+      <h1 style="flex:1;">Publicar KML a GitHub → <span>baches.kml</span></h1>
+      <a class="btn ghost" id="openViewer" target="_blank" rel="noopener">Abrir visor público</a>
+      <a class="btn raw" id="openRaw" target="_blank" rel="noopener">Ver raw</a>
+    </div>
+
+    <form id="frm">
+      <div class="row inline2">
+        <div>
+          <label>Repo (owner/nombre)</label>
+          <input id="repo" type="text" value="Gerardo0503/Nogales" autocomplete="off" spellcheck="false">
+        </div>
+        <div>
+          <label>Branch</label>
+          <input id="branch" type="text" value="main" autocomplete="off" spellcheck="false">
+        </div>
+        <div>
+          <label>Ruta destino</label>
+          <input id="dest" type="text" value="baches.kml" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Token GitHub <span class="mini">(scope: <b>contents:write</b>)</span></label>
+        <input id="token" type="password" placeholder="ghp_… o github_pat_…">
+      </div>
+
+      <div class="row">
+        <label>Archivo KML/KMZ</label>
+        <input id="file" type="file" accept=".kml,.kmz">
+      </div>
+
+      <div class="btns">
+        <button type="submit">Publicar como <b id="destName">baches.kml</b></button>
+        <button class="btn ghost" type="button" id="btnViewer">Abrir visor público</button>
+        <button class="btn raw" type="button" id="btnRaw">Ver raw</button>
+      </div>
+    </form>
+
+    <div class="notice">
+      Si no ves cambios en el visor, pulsa “Abrir visor público”; agrega <span class="kbd">?t=<span id="ts"></span></span> para romper caché.
+    </div>
+
+    <div class="grid" style="padding:0 18px 18px">
+      <label>Bitácora</label>
+      <div id="log" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const log = (m, cls='') => { const el = document.createElement('div'); el.className=cls; el.textContent=m; $("#log").appendChild(el); $("#log").scrollTop = $("#log").scrollHeight; };
+
+const repoEl = $("#repo"), branchEl=$("#branch"), destEl=$("#dest"), tokenEl=$("#token"), fileEl=$("#file");
+const ts = Date.now(); $("#ts").textContent = ts;
+
+function ghRawURL() {
+  const [owner,repo] = repoEl.value.trim().split("/");
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branchEl.value.trim())}/${destEl.value.trim()}?t=${Date.now()}`;
+}
+function viewerURL() {
+  const [owner,repo] = repoEl.value.trim().split("/");
+  // Project Pages URL: https://<owner>.github.io/<repo>/
+  return `https://${owner}.github.io/${repo}/?t=${Date.now()}`;
+}
+
+function setQuickLinks(){
+  $("#openViewer").href = viewerURL();
+  $("#openRaw").href    = ghRawURL();
+  $("#btnViewer").onclick = ()=> window.open(viewerURL(), "_blank","noopener");
+  $("#btnRaw").onclick    = ()=> window.open(ghRawURL(), "_blank","noopener");
+  $("#destName").textContent = destEl.value.trim() || "baches.kml";
+}
+setQuickLinks();
+destEl.addEventListener("input", setQuickLinks);
+repoEl.addEventListener("input", setQuickLinks);
+branchEl.addEventListener("input", setQuickLinks);
+
+async function fetchJSON(url, opts){
+  const res = await fetch(url, opts);
+  const text = await res.text();
+  try { return { ok: res.ok, status: res.status, json: JSON.parse(text) }; }
+  catch { return { ok: res.ok, status: res.status, text }; }
+}
+
+async function getShaIfExists(owner, repo, path, branch, token){
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
+  const r = await fetchJSON(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" } });
+  if (r.ok && r.json && r.json.sha) return r.json.sha;
+  return null;
+}
+
+function toBase64(file){
+  return new Promise((resolve, reject)=>{
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("No se pudo leer el archivo"));
+    fr.onload = () => {
+      const res = String(fr.result);
+      const base64 = res.startsWith("data:") ? res.split(",",2)[1] : res;
+      resolve(base64);
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+document.getElementById("frm").addEventListener("submit", async (ev)=>{
+  ev.preventDefault();
+  $("#log").textContent="";
+  const repoFull = repoEl.value.trim();
+  if(!/^[^\/]+\/[^\/]+$/.test(repoFull)){ log("Repo inválido. Usa owner/nombre, p.ej. Gerardo0503/Nogales","err"); return; }
+  const [owner, repo] = repoFull.split("/");
+  const branch = branchEl.value.trim() || "main";
+  const dest = destEl.value.trim() || "baches.kml";
+  const token = tokenEl.value.trim();
+  const file = fileEl.files[0];
+
+  if(!token){ log("Falta token.","err"); return; }
+  if(!file){ log("Selecciona un archivo .kml o .kmz.","err"); return; }
+
+  log(`Leyendo archivo… ${file.name}`);
+  let base64;
+  try { base64 = await toBase64(file); }
+  catch(e){ log(e.message, "err"); return; }
+
+  log("Buscando sha (si existe el archivo)…");
+  let sha = null;
+  try { sha = await getShaIfExists(owner, repo, dest, branch, token); }
+  catch(e){ /* ignore */ }
+  if(sha) log(`Encontrado sha: ${sha.slice(0,7)}…`, "muted");
+  else log("No existe archivo anterior; se creará.", "muted");
+
+  log("Subiendo a GitHub…");
+  const putUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(dest)}`;
+  const body = {
+    message: `publish: ${file.name} → ${dest}`,
+    content: base64,
+    branch
+  };
+  if(sha) body.sha = sha;
+
+  const r = await fetchJSON(putUrl, {
+    method: "PUT",
+    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "Accept":"application/vnd.github+json" },
+    body: JSON.stringify(body)
+  });
+
+  if(!r.ok){
+    log(`Error ${r.status}: ${r.text || (r.json && JSON.stringify(r.json))}`,"err");
+    return;
+  }
+  log("✅ Publicado. Abre el visor y pulsa “Actualizar”.","ok");
+  setQuickLinks();
+});
+</script>
+</body>
+</html>

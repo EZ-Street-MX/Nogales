@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>EZ Street MX | Mapa de Bacheo</title>
+  <meta name="description" content="Visualizador de baches con KML/GeoJSON. GitHub Pages. Sin login." />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <style>
+    :root{ --bg:#0b1220; --panel:#0f172a; --panel-2:#111827; --text:#e5e7eb; --muted:#94a3b8; --brand:#00a0e3; --accent:#22d3ee; }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+    .app{display:grid;grid-template-rows:auto 1fr; height:100%}
+    header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:10px 14px;background:#0d1726;border-bottom:1px solid rgba(255,255,255,.06)}
+    .controls{display:flex;flex-wrap:wrap; gap:8px; align-items:center}
+    input[type="url"]{background:var(--panel-2); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:8px 10px; border-radius:10px; min-width:280px}
+    .btn{background:#15223a; color:var(--text); border:1px solid rgba(255,255,255,.12); padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600}
+    .btn:hover{background:#1b2b4b}
+    .layout{display:grid; grid-template-columns: 320px 1fr; height:100%;}
+    .sidebar{background:var(--panel); border-right:1px solid rgba(255,255,255,.06); display:flex; flex-direction:column}
+    .side-head{padding:12px; border-bottom:1px solid rgba(255,255,255,.06);}
+    .search{width:100%; background:var(--panel-2); border:1px solid rgba(255,255,255,.12); color:var(--text); padding:9px 12px; border-radius:10px}
+    .list{overflow:auto}
+    .item{padding:12px; border-bottom:1px dashed rgba(255,255,255,.06); cursor:pointer}
+    .item:hover{background:rgba(255,255,255,.04)}
+    .item h4{margin:0 0 6px; font-size:14px}
+    .item .muted{color:var(--muted); font-size:12px}
+    #map{height:100%; width:100%}
+    .leaflet-container{background:#0b1220}
+    .footer{padding:8px 12px; border-top:1px solid rgba(255,255,255,.06); color:var(--muted); font-size:12px; display:flex; gap:10px; justify-content:space-between}
+    .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:rgba(34,211,238,.15); color:#67e8f9; border:1px solid rgba(34,211,238,.3)}
+    .toast{position:fixed;left:50%;top:12px;transform:translateX(-50%);background:#111827;color:#fff;border:1px solid rgba(255,255,255,.12);padding:8px 12px;border-radius:10px;z-index:2000;display:none}
+    .toast.show{display:block}
+    @media (max-width:900px){ .layout{grid-template-columns:1fr} .sidebar{display:none} }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div style="font-weight:700">EZ Street MX · Mapa de Bacheo</div>
+      <div class="controls">
+        <input id="dataUrl" type="url" placeholder="URL pública del KML/GeoJSON (RAW de GitHub, etc.)" />
+        <button class="btn" id="btnLoadUrl">Cargar URL</button>
+        <input id="fileInput" type="file" accept=".kml,.kmz,.geojson,.json" hidden>
+        <button class="btn" id="btnPickFile">KML local</button>
+        <button class="btn" id="btnRefresh">Actualizar</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="side-head">
+          <input id="search" class="search" type="text" placeholder="Buscar bache..." />
+        </div>
+        <div id="list" class="list"></div>
+        <div class="footer">
+          <span id="status">Listo.</span>
+          <span class="badge" id="count">0</span>
+        </div>
+      </aside>
+      <main id="map"></main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Libs -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://unpkg.com/@mapbox/leaflet-omnivore@0.3.4/leaflet-omnivore.min.js"></script>
+
+  <script>
+    const $ = (s,p=document)=>p.querySelector(s);
+    const $$ = (s,p=document)=>Array.from(p.querySelectorAll(s));
+    const statusEl = $('#status'); const countEl = $('#count');
+    const toast = $('#toast');
+    const storeKey = 'ezstreet_baches_data_url';
+    const getParam = k => new URLSearchParams(location.search).get(k);
+    const showToast = msg => { toast.textContent = msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), 3000); };
+
+    const map = L.map('map', { minZoom: 2 }).setView([31.307, -110.948], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap' }).addTo(map);
+    const cluster = L.markerClusterGroup({ showCoverageOnHover:false, spiderfyOnEveryZoom:false, maxClusterRadius:50 }).addTo(map);
+
+    let markers = [];
+
+    function clearData(){ cluster.clearLayers(); markers=[]; $('#list').innerHTML=''; countEl.textContent='0'; }
+
+    function addGeoJSON(gj){
+      clearData();
+      const layer = L.geoJSON(gj, {
+        pointToLayer: (f, latlng) => {
+          const name = f.properties?.name || f.properties?.Name || 'Bache';
+          const m = L.marker(latlng, { title:name });
+          m.bindPopup(`<b>${name}</b>`);
+          m._meta = { name, latlng, props: f.properties||{} };
+          markers.push(m);
+          return m;
+        }
+      });
+      markers.forEach(m => cluster.addLayer(m));
+      if(markers.length){ try{ map.fitBounds(L.featureGroup(markers).getBounds().pad(0.15)); }catch(e){} }
+      $('#list').innerHTML = markers.map((m,i)=>`<div class="item" data-i="${i}"><h4>${m._meta.name}</h4><div class="muted">${m._meta.latlng.lat.toFixed(6)}, ${m._meta.latlng.lng.toFixed(6)}</div></div>`).join('');
+      $$('#list .item').forEach(el=> el.onclick = ()=>{ const i = +el.dataset.i; const mk = markers[i]; map.setView(mk.getLatLng(), Math.max(map.getZoom(), 17)); mk.openPopup(); });
+      countEl.textContent = String(markers.length);
+      statusEl.textContent = 'Datos cargados.';
+    }
+
+    async function loadFromUrl(url){
+      try{
+        statusEl.textContent = 'Cargando datos...';
+        const bust = url + (url.includes('?')?'&':'?') + '_=' + Date.now();
+        if(/\.(kml|kmz)$/i.test(url)){
+          const kml = omnivore.kml(bust).on('ready', function(){ try{ map.fitBounds(kml.getBounds().pad(0.15)); }catch(e){}; statusEl.textContent='Datos cargados.'; })
+                                         .on('error', function(e){ console.error(e); showToast('Error leyendo KML'); statusEl.textContent='Error.'; });
+          clearData();
+          kml.eachLayer(l=>{ if(l.getLatLng){ markers.push(l); cluster.addLayer(l); } });
+        } else {
+          const res = await fetch(bust);
+          const gj = await res.json();
+          addGeoJSON(gj);
+        }
+      }catch(err){ console.error(err); showToast('No se pudo cargar la URL'); statusEl.textContent='Error.'; }
+    }
+
+    async function loadLocalFile(file){
+      statusEl.textContent = 'Importando archivo...';
+      // NEW: usar Blob URL con Omnivore para KML/KMZ (más rápido y robusto)
+      const ext = file.name.split('.').pop().toLowerCase();
+      const blobUrl = URL.createObjectURL(file);
+      try{
+        if(ext==='kml' || ext==='kmz'){
+          clearData();
+          const layer = omnivore.kml(blobUrl).on('ready', function(){ try{ map.fitBounds(layer.getBounds().pad(0.15)); }catch(e){}; statusEl.textContent='Archivo cargado.'; })
+                                             .on('error', function(e){ console.error(e); showToast('KML inválido'); statusEl.textContent='Error.'; });
+          layer.addTo(map);
+          // recolectar marcadores cuando lea
+          layer.on('ready', function(){ layer.eachLayer(l=>{ if(l.getLatLng){ markers.push(l); cluster.addLayer(l); } }); countEl.textContent=String(markers.length); });
+        } else {
+          const text = await file.text();
+          const gj = JSON.parse(text);
+          addGeoJSON(gj);
+        }
+      }catch(err){ console.error(err); showToast('No se pudo importar el archivo'); statusEl.textContent='Error.'; }
+      finally{ URL.revokeObjectURL(blobUrl); }
+    }
+
+    // Eventos UI
+    $('#btnPickFile').onclick = ()=> $('#fileInput').click();
+    $('#fileInput').onchange = e => e.target.files[0] && loadLocalFile(e.target.files[0]);
+    $('#btnLoadUrl').onclick = ()=> { const u=$('#dataUrl').value.trim(); if(!u){ showToast('Pega la URL pública'); return; } localStorage.setItem(storeKey,u); loadFromUrl(u); };
+    $('#btnRefresh').onclick = ()=> { const u=$('#dataUrl').value.trim() || localStorage.getItem(storeKey) || getParam('data'); if(!u){ showToast('Sin URL para actualizar'); return; } loadFromUrl(u); };
+    $('#search').oninput = e => {
+      const q = e.target.value.trim().toLowerCase();
+      $$('#list .item').forEach(el=> { const t = el.querySelector('h4').textContent.toLowerCase(); el.style.display = t.includes(q)?'block':'none'; });
+    };
+
+    // Autocarga por ?data= o última usada
+    (function init(){
+      const url = getParam('data') || 'https://raw.githubusercontent.com/gerardo0503/Nogales/main/baches_nogales_clean_20250810-000525.kml';
+      if(url){ $('#dataUrl').value=url; loadFromUrl(url); }
+    })();
+  </script>
+</body>
+</html>

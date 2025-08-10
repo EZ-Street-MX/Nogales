@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nogales · Mapa de Baches (estable)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html,body{height:100%;margin:0}
+  #app{position:fixed;inset:0;display:grid;grid-template-columns:280px 1fr}
+  #left{background:#0f172a;color:#e5e7eb;display:flex;flex-direction:column;border-right:1px solid #1f2937}
+  #map{height:100%;width:100%}
+  .top{padding:10px;border-bottom:1px solid #1f2937}
+  .btn{background:#0b1220;border:1px solid #1f2937;color:#e5e7eb;border-radius:6px;padding:6px 10px;cursor:pointer}
+  .search{width:100%;background:#0b1220;border:1px solid #1f2937;color:#e5e7eb;border-radius:6px;padding:6px 10px}
+  .list{overflow:auto}
+  .item{padding:10px;border-bottom:1px solid #0b1220;cursor:pointer}
+  .item small{display:block;color:#9ca3af}
+  #msg{position:fixed;left:12px;bottom:12px;background:#111827;color:#e5e7eb;border:1px solid #233146;border-radius:8px;padding:8px 10px;max-width:50vw;display:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="left">
+    <div class="top">
+      <input id="inUrl" class="search" placeholder="URL KML (o usa el predeterminado)">
+      <div style="margin-top:8px;display:flex;gap:6px">
+        <button id="btnUrl" class="btn">Cargar URL</button>
+        <label class="btn">KML local
+          <input id="file" type="file" accept=".kml,.kmz" style="display:none">
+        </label>
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:#9ca3af">Predeterminado: <code>baches.kml</code></div>
+    </div>
+    <div id="list" class="list"></div>
+  </aside>
+  <div id="map"></div>
+</div>
+<div id="msg"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', {preferCanvas:true}).setView([31.31,-110.94], 13);
+const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19}).addTo(map);
+const osm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:20});
+L.control.layers({'Satélite':esri,'Calles':osm}).addTo(map);
+
+const qs = new URLSearchParams(location.search);
+let currentURL = qs.get('data') || 'baches.kml';
+document.getElementById('inUrl').value = currentURL;
+
+const msg = (t)=>{ const m=document.getElementById('msg'); m.textContent=t; m.style.display='block'; setTimeout(()=>m.style.display='none',4000); };
+
+let features=[];
+let layer=null;
+
+function parseKml(txt){
+  const feats=[];
+  // split by Placemark
+  const rx=/<Placemark[\s\S]*?<\/Placemark>/gi; let m; let i=0;
+  while((m=rx.exec(txt))){
+    const block=m[0]; const props={_id:++i};
+    block.replace(/<SimpleData[^>]*name=\"([^"]+)\"[^>]*>([\s\S]*?)<\/SimpleData>/gi,(a,n,v)=>{props[n]=v.replace(/<[^>]+>/g,'').trim();});
+    const nm=/<name>([\s\S]*?)<\/name>/i.exec(block); if(nm) props.name=nm[1].trim();
+    // Point
+    const pt=/<Point>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/Point>/i.exec(block);
+    if(pt){ const p=pt[1].trim().split(',').map(Number); if(p.length>=2) { feats.push({t:'Point', c:[p[1],p[0]], p:props}); continue; } }
+    // LineString
+    const ln=/<LineString>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/LineString>/i.exec(block);
+    if(ln){ const arr=ln[1].trim().split(/\s+/).map(s=>s.split(',').map(Number)).filter(a=>a.length>=2).map(a=>[a[1],a[0]]); feats.push({t:'Line', c:arr, p:props}); continue; }
+    // Polygon (outer ring)
+    const pg=/<Polygon>[\s\S]*?<outerBoundaryIs>[\s\S]*?<LinearRing>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/LinearRing>[\s\S]*?<\/outerBoundaryIs>[\s\S]*?<\/Polygon>/i.exec(block);
+    if(pg){ const arr=pg[1].trim().split(/\s+/).map(s=>s.split(',').map(Number)).filter(a=>a.length>=2).map(a=>[a[1],a[0]]); feats.push({t:'Poly', c:[arr], p:props}); continue; }
+  }
+  return feats;
+}
+
+function draw(){
+  if(layer) { map.removeLayer(layer); }
+  const group=[];
+  features.forEach(f=>{
+    let Lyr=null;
+    if(f.t==='Point'){ Lyr=L.marker(f.c); }
+    else if(f.t==='Line'){ Lyr=L.polyline(f.c,{color:'#3b82f6',weight:6,opacity:.85}); }
+    else if(f.t==='Poly'){ Lyr=L.polygon(f.c,{color:'#22c55e',weight:2,fillOpacity:.2}); }
+    if(!Lyr) return;
+    Lyr.on('click',()=>show(f,Lyr));
+    group.push(Lyr);
+  });
+  layer = L.featureGroup(group).addTo(map);
+  try{ const b=layer.getBounds(); if(b.isValid()) map.fitBounds(b.pad(.2)); }catch(_){}
+  buildList();
+  msg('Cargado: '+features.length+' elemento(s)');
+}
+
+function show(f,lyr){
+  const p=f.p||{};
+  const fotos = [p.Fotoantes||p.FotoAntes||p.fotoantes||'', p.FotoReferencia||'', p.FotoFinal||'']
+    .map(s=>{ const m=String(s).match(/https?:\/\/[^\s\"'<>\)]+/); return m?m[0]:null; })
+    .filter(Boolean);
+  const html = '<b>'+(p.name||'Bache')+'</b><br>'+
+               (p.TipodeTrabajo?'Tipo: '+p.TipodeTrabajo+'<br>':'')+
+               (p.NumeroDeBache?'# '+p.NumeroDeBache+'<br>':'')+
+               (p.Ancho?'Ancho: '+p.Ancho+'<br>':'')+
+               (p.Largo?'Largo: '+p.Largo+'<br>':'')+
+               (p.Colonia?'Colonia: '+p.Colonia+'<br>':'')+
+               (p.Calle?'Calle: '+p.Calle+'<br>':'')+
+               (fotos.length?('<div style=\"margin-top:6px\">'+fotos.map(u=>'<a href=\"'+u+'\" target=\"_blank\">foto</a>').join(' · ')+'</div>'):'')+
+               '<div style=\"margin-top:6px\"><a target=\"_blank\" href=\"https://www.google.com/maps?q='+(lyr.getLatLng?lyr.getLatLng().lat+','+lyr.getLatLng().lng:'')+'\">Ver en Maps</a></div>';
+  lyr.bindPopup(html).openPopup();
+}
+
+async function loadURL(u){
+  try{
+    const res = await fetch(u + (u.includes('?')?'&':'?') + 't=' + Date.now());
+    if(!res.ok){ msg('No se pudo cargar el KML ('+res.status+')'); return; }
+    const txt = await res.text();
+    features = parseKml(txt);
+    draw();
+  }catch(e){ msg('Error: '+e.message); }
+}
+
+function buildList(){
+  const $l=document.getElementById('list'); $l.innerHTML='';
+  features.forEach((f,i)=>{
+    const p=f.p||{};
+    const it=document.createElement('div'); it.className='item';
+    it.innerHTML='<div>'+(p.name||('kml_'+(i+1)))+'</div><small>'+(f.t)+'</small>';
+    it.onclick=()=>{
+      let lyr=null;
+      if(f.t==='Point'){ lyr=L.marker(f.c); map.setView(f.c,18); }
+      else if(f.t==='Line'){ lyr=L.polyline(f.c); map.fitBounds(lyr.getBounds().pad(.2)); }
+      else if(f.t==='Poly'){ lyr=L.polygon(f.c); map.fitBounds(lyr.getBounds().pad(.2)); }
+      if(lyr){ show(f,lyr); }
+    };
+    $l.appendChild(it);
+  });
+}
+
+document.getElementById('btnUrl').onclick=()=>{
+  currentURL = document.getElementById('inUrl').value.trim();
+  if(currentURL) loadURL(currentURL);
+};
+document.getElementById('file').addEventListener('change',async ev=>{
+  const f=ev.target.files[0]; if(!f) return;
+  const txt = await f.text();
+  features = parseKml(txt); draw();
+});
+// init
+loadURL(currentURL);
+</script>
+</body>
+</html>

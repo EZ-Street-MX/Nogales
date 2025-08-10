@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EZ Street MX · Mapa de Bacheo</title>
+
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+  crossorigin="anonymous"
+/>
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"
+/>
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"
+/>
+
+<style>
+  :root{
+    --bg:#0f1720;
+    --panel:#0f1720;
+    --panel2:#0b121a;
+    --text:#e5eef7;
+    --muted:#9cb3c7;
+    --accent:#66d9ef;
+  }
+  html,body{height:100%;margin:0;background:#0b1117;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial,'Noto Sans',sans-serif}
+  #app{display:grid; grid-template-columns: 1fr 420px; grid-template-rows: 56px 1fr; height:100%;}
+  header{grid-column:1/3; display:flex; gap:12px; align-items:center; padding:10px 14px; background:#0b1117; border-bottom:1px solid #182534;}
+  header .title{font-weight:700; letter-spacing:.2px;}
+  header .chip{margin-left:auto; background:#192635; padding:6px 10px; border-radius:10px; font-size:.9rem; color:#cfe3f5}
+  #map{grid-column:1/2; grid-row:2/3;}
+  aside{grid-column:2/3; grid-row:2/3; background:var(--panel); border-left:1px solid #182534; overflow:auto;}
+  .panel{padding:14px 14px 60px 14px;}
+  .row{display:flex; gap:10px;}
+  .caps{font-size:.78rem; letter-spacing:.06em; color:var(--muted); margin-bottom:6px;}
+  .photos{display:flex; gap:10px; margin-bottom:14px;}
+  .ph{width:calc((100% - 20px)/3); height:140px; background:#0b121a; border:1px solid #1c2a3a; border-radius:10px; overflow:hidden; position:relative; cursor:pointer}
+  .ph img{width:100%; height:100%; object-fit:cover; display:block;}
+  .ph .lbl{position:absolute; left:8px; top:8px; background:#000a; color:#fff; padding:2px 6px; border-radius:6px; font-size:.72rem}
+  .card{background:var(--panel2); border:1px solid #1c2a3a; border-radius:14px; padding:10px 12px; margin-bottom:14px;}
+  .grid{display:grid; grid-template-columns: 120px 1fr; row-gap:8px; column-gap:10px; align-items:start;}
+  .key{color:var(--muted); font-size:.9rem}
+  .val{font-weight:600; color:#e6f0fa}
+  .actions{display:flex; gap:8px; margin-bottom:10px}
+  .btn{background:#152233; border:1px solid #1f3146; color:#cfe3f5; padding:7px 10px; border-radius:10px; cursor:pointer; font-weight:600}
+  .btn:hover{background:#1b2b40}
+  .hidden{display:none !important;}
+  .foot{position:sticky; bottom:0; background:linear-gradient(180deg, #0f1720 0%, #0b1117 30%); height:24px}
+  .leaflet-control-zoom{display:none} /* oculta + - como pediste */
+  /* cluster style */
+  .marker-cluster-small{background:rgba(102, 217, 239, .15);}
+  .marker-cluster-small div{background:#66d9ef;color:#032531}
+  @media (max-width:1024px){
+    #app{grid-template-columns:1fr; grid-template-rows: 56px 1fr 380px}
+    aside{grid-column:1/2; grid-row:3/4}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="title">EZ Street MX · Mapa de Bacheo</div>
+    <div id="fileName" class="chip">baches.kml</div>
+  </header>
+
+  <div id="map"></div>
+
+  <aside>
+    <div class="panel">
+      <div class="actions">
+        <div id="badge" class="btn">Baches</div>
+        <a id="gmap" class="btn" href="#" target="_blank" rel="noopener">Ver en Maps</a>
+      </div>
+
+      <div class="caps">FOTOS</div>
+      <div class="photos">
+        <div class="ph" id="ph-antes"><span class="lbl">Antes</span><img id="img-antes" alt="Foto antes" /></div>
+        <div class="ph" id="ph-ref"><span class="lbl">Referencia</span><img id="img-ref" alt="Foto referencia" /></div>
+        <div class="ph" id="ph-final"><span class="lbl">Final</span><img id="img-final" alt="Foto final" /></div>
+      </div>
+
+      <div class="caps">MEDIDAS</div>
+      <div class="card grid">
+        <div class="key">Ancho</div><div class="val" id="v-ancho">—</div>
+        <div class="key">Largo</div><div class="val" id="v-largo">—</div>
+        <div class="key">Tipo</div><div class="val" id="v-tipo">—</div>
+        <div class="key"># Bache</div><div class="val" id="v-num">—</div>
+        <div class="key">Cadenamiento</div><div class="val" id="v-cad">—</div>
+        <div class="key">Colonia</div><div class="val" id="v-col">—</div>
+        <div class="key">Calle</div><div class="val" id="v-calle">—</div>
+        <div class="key">Entre calles</div><div class="val" id="v-entre">—</div>
+      </div>
+    </div>
+    <div class="foot"></div>
+  </aside>
+</div>
+
+<!-- Intenta local togeojson primero; si no existe, carga CDN -->
+<script src="./lib/togeojson.umd.js" onerror="this.remove()"></script>
+<script>
+(function ensureToGeo(){
+  if (!window.toGeoJSON){
+    var s=document.createElement('script');
+    s.src='https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js';
+    s.crossOrigin='anonymous';
+    document.head.appendChild(s);
+  }
+})();
+</script>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+ integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+// ---------- util: query param ---------
+function getParam(name, fallback){
+  const u = new URL(window.location.href);
+  return u.searchParams.get(name) || fallback;
+}
+
+// ---------- util: imagen segura (arreglo 400) ----------
+function toHttps(u) {
+  if (!u) return "";
+  u = u.trim();
+  try { u = decodeURIComponent(u); } catch(e){}
+  if (/^data:/i.test(u)) return u;
+  if (/^\/\//.test(u)) return "https:" + u;
+  if (/^https:\/\//i.test(u)) return u;
+  if (/^http:\/\//i.test(u)) return u.replace(/^http:/i, "https:");
+  return u; // podría ser ruta relativa o dominio sin protocolo
+}
+function proxifyImage(u) {
+  if (!u) return "";
+  u = toHttps(u);
+  if (/^https:\/\//i.test(u) || /^data:/i.test(u)) return u; // ya seguro
+  if (/^http:\/\//i.test(u)) {
+    const noProto = u.replace(/^https?:\/\//i, "");
+    return "https://images.weserv.nl/?url=" + encodeURIComponent(noProto);
+  }
+  // sin protocolo -> proxy
+  const noProto = u.replace(/^https?:\/\//i, "");
+  return "https://images.weserv.nl/?url=" + encodeURIComponent(noProto);
+}
+function imgSrcAndHref(raw){
+  if (!raw) return {src:"", href:""};
+  return { src: proxifyImage(raw), href: toHttps(raw) };
+}
+
+// ---------- mapa ----------
+const map = L.map('map', {
+  zoomControl:false, // quitamos +/-
+  maxZoom: 22
+}).setView([31.304, -110.941], 14);
+
+const esriSat = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  { maxNativeZoom: 19, maxZoom: 22, attribution: '&copy; Esri' }
+).addTo(map);
+
+// cluster de marcadores (puntitos rojos)
+const cluster = L.markerClusterGroup({
+  showCoverageOnHover:false,
+  maxClusterRadius: 60,
+  iconCreateFunction: function (cluster) {
+    const count = cluster.getChildCount();
+    const div = document.createElement('div');
+    div.style.width = div.style.height = '32px';
+    div.style.lineHeight = '32px';
+    div.style.borderRadius = '50%';
+    div.style.textAlign = 'center';
+    div.style.background = '#66d9ef';
+    div.style.color = '#032531';
+    div.style.fontWeight = '700';
+    div.textContent = count;
+    return L.divIcon({ html: div, className:'', iconSize:[32,32] });
+  }
+});
+map.addLayer(cluster);
+
+// capa de puntitos
+function circleMarker(latlng){
+  return L.circleMarker(latlng, {
+    radius: 4,
+    color: '#ff3347',
+    weight: 1,
+    fillColor: '#ff3347',
+    fillOpacity: 0.9
+  });
+}
+
+// ---------- panel DOM refs ----------
+const els = {
+  badge: document.getElementById('badge'),
+  gmap: document.getElementById('gmap'),
+  imgAntes: document.getElementById('img-antes'),
+  imgRef: document.getElementById('img-ref'),
+  imgFinal: document.getElementById('img-final'),
+  vAncho: document.getElementById('v-ancho'),
+  vLargo: document.getElementById('v-largo'),
+  vTipo: document.getElementById('v-tipo'),
+  vNum: document.getElementById('v-num'),
+  vCad: document.getElementById('v-cad'),
+  vCol: document.getElementById('v-col'),
+  vCalle: document.getElementById('v-calle'),
+  vEntre: document.getElementById('v-entre'),
+  fileChip: document.getElementById('fileName'),
+  phAntes: document.getElementById('ph-antes'),
+  phRef: document.getElementById('ph-ref'),
+  phFinal: document.getElementById('ph-final')
+};
+
+function setPanel(props, latlng){
+  function pick(...keys){
+    for (const k of keys){
+      if (props[k] != null && props[k] !== '') return props[k];
+    }
+    return '—';
+  }
+
+  const antes = imgSrcAndHref(pick('Fotoantes','FotoAntes','Foto_antes','fotoantes'));
+  const ref   = imgSrcAndHref(pick('FotoReferencia','Foto_Referencia','fotoReferencia'));
+  const fin   = imgSrcAndHref(pick('FotoFinal','Foto_Final','fotofinal'));
+
+  els.imgAntes.src = antes.src;  els.phAntes.onclick = () => antes.href && window.open(antes.href,'_blank');
+  els.imgRef.src   = ref.src;    els.phRef.onclick   = () => ref.href && window.open(ref.href,'_blank');
+  els.imgFinal.src = fin.src;    els.phFinal.onclick = () => fin.href && window.open(fin.href,'_blank');
+
+  els.vAncho.textContent = pick('Ancho','ancho','Width');
+  els.vLargo.textContent = pick('Largo','largo','Length');
+  els.vTipo.textContent  = pick('Tipodetrabajo','TipoTrabajo','Tipo','tipodetrabajo');
+  els.vNum.textContent   = pick('NumerodeBache','NumeroBache','NoBache','NumBache','# Bache','Numerodebache');
+  els.vCad.textContent   = pick('Cadenamiento','Cadenamientoo','cadenamiento');
+  els.vCol.textContent   = pick('Colonia','colonia');
+  els.vCalle.textContent = pick('Calle','calle');
+  els.vEntre.textContent = pick('Entrecalles','EntreCalles','entreCalles','Entrecalles ');
+
+  if (latlng){
+    const q = `${latlng.lat.toFixed(6)},${latlng.lng.toFixed(6)}`;
+    els.gmap.href = `https://www.google.com/maps?q=${q}`;
+  }
+}
+
+// ---------- cargar KML ----------
+async function loadKml(url){
+  const res = await fetch(url, { cache:'no-store' });
+  if (!res.ok) throw new Error('No se pudo leer el KML');
+  const txt = await res.text();
+  const xml = new DOMParser().parseFromString(txt, 'text/xml');
+  if (!window.toGeoJSON || !window.toGeoJSON.kml){
+    // espera a que cargue UMD si tardó
+    await new Promise(r => setTimeout(r, 200));
+  }
+  const gj = window.toGeoJSON.kml(xml);
+  return gj;
+}
+
+function featureProps(f){
+  return (f && (f.properties || f.tags || f.props)) || {};
+}
+
+function addGeoJSON(gj){
+  const layer = L.geoJSON(gj, {
+    pointToLayer: function (f, latlng) {
+      const m = circleMarker(latlng);
+      m.on('click', () => setPanel(featureProps(f), latlng));
+      return m;
+    }
+  });
+  cluster.clearLayers();
+  cluster.addLayer(layer);
+  try{ map.fitBounds(layer.getBounds(), { padding:[30,30] }); }catch(e){}
+  // set panel con el primero
+  let first;
+  layer.eachLayer(l=>{ if(!first){ first = l; } });
+  if (first){
+    const p = featureProps(first.feature);
+    setPanel(p, first.getLatLng());
+  }
+}
+
+(async function init(){
+  const data = getParam('data','baches.kml');
+  els.fileChip.textContent = data;
+  try{
+    const gj = await loadKml(data);
+    addGeoJSON(gj);
+  }catch(err){
+    console.error(err);
+    alert('No se pudo cargar el KML: ' + err.message);
+  }
+})();
+</script>
+</body>
+</html>

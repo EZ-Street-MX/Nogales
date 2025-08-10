@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nogales · Mapa de Baches (robusto)</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html,body,#map{height:100%;margin:0}
+    .hud{position:fixed;left:12px;bottom:12px;background:#111827;color:#fff;padding:8px 10px;
+         border-radius:10px;font:12px system-ui,Segoe UI,Roboto;opacity:.95;max-width:520px}
+    .hud b{color:#67e8f9}
+    .btn{cursor:pointer;background:#0b1220;border:1px solid #243244;border-radius:8px;
+         padding:6px 10px;margin-left:8px;color:#d1d5db}
+    .legend{position:fixed;right:12px;top:12px;background:#111827;color:#e5e7eb;
+            padding:8px 10px;border-radius:10px;font:12px system-ui;opacity:.95}
+  </style>
+
+  <!-- togeojson (CDN + fallback) -->
+  <script src="https://cdn.jsdelivr.net/npm/togeojson@0.16.0/dist/togeojson.umd.js"></script>
+  <script>
+    if(!window.toGeoJSON && !window.togeojson){
+      document.write('<script src="https://unpkg.com/togeojson/dist/togeojson.umd.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="hud" class="hud" style="display:none"></div>
+  <div class="legend">Capas: usa el control ↑ (esquina sup. derecha).<br>Modo debug: agrega <code>?debug=1</code></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ---------- mapa base ----------
+    const osm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:20, attribution:'© OSM'});
+    const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Tiles © Esri'});
+
+    const map = L.map('map', {preferCanvas:true, layers:[esri]}).setView([31.307, -110.948], 14);
+    L.control.layers({"Satélite (Esri)": esri, "Calles (OSM)": osm}, {}, {collapsed:false}).addTo(map);
+
+    // ---------- utilidades ----------
+    const hud   = document.getElementById('hud');
+    const qs    = new URLSearchParams(location.search);
+    const debug = qs.has('debug');
+    const url   = qs.get('data') || 'baches.kml';
+
+    function show(msg){
+      hud.innerHTML = msg;
+      hud.style.display = 'block';
+    }
+
+    async function fetchText(u){
+      const res = await fetch(u + (u.includes('?')?'&':'?') + 't=' + Date.now());
+      if(!res.ok) throw new Error('HTTP '+res.status+' '+u);
+      return await res.text();
+    }
+
+    // Fallback muy simple: sólo <Placemark><Point><coordinates>lon,lat[,z]
+    function kmlFallbackToGeoJSON(kmlText){
+      const feats = [];
+      const rx = /<Placemark[\s\S]*?<Point>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/Point>[\s\S]*?<\/Placemark>/gi;
+      let m,count=0;
+      while((m = rx.exec(kmlText))){
+        const txt = m[1].trim();
+        const p = txt.split(',').map(Number);
+        if(p.length>=2 && isFinite(p[0]) && isFinite(p[1])){
+          feats.push({ type:'Feature', geometry:{ type:'Point', coordinates:[p[0],p[1]] }, properties:{} });
+          count++;
+        }
+      }
+      return { type:'FeatureCollection', features:feats, _fallbackCount:count };
+    }
+
+    function draw(gj){
+      const layer = L.geoJSON(gj, {
+        pointToLayer: (_, latlng) => L.circleMarker(latlng, {radius:6, weight:1, fillOpacity:0.85})
+      }).addTo(map);
+
+      try{
+        const b = layer.getBounds();
+        if(b && b.isValid()) map.fitBounds(b.pad(0.25));
+      }catch(_){}
+
+      const n = gj.features?.length ?? 0;
+      if(debug){
+        const fb = (gj._fallbackCount!=null) ? ' · modo <b>fallback</b>' : '';
+        show('Cargado <b>'+n+'</b> punto(s) desde <code>'+url+'</code>'+fb+
+             '<button class="btn" onclick="location.reload()">Actualizar</button>');
+      }
+    }
+
+    (async ()=>{
+      try{
+        const txt = await fetchText(url);
+
+        // 1) intentar con togeojson (si existe)
+        let gj = null;
+        const TG = window.toGeoJSON || window.togeojson;
+        if(TG){
+          try{
+            const xml = new DOMParser().parseFromString(txt, 'text/xml');
+            gj = TG.kml(xml);
+          }catch(e){
+            if(debug) show('toGeoJSON falló: '+e.message);
+          }
+        }
+
+        // 2) si no salió nada, usar fallback
+        if(!gj || !gj.features || gj.features.length===0){
+          const gj2 = kmlFallbackToGeoJSON(txt);
+          if((gj2.features||[]).length>0){ draw(gj2); return; }
+          throw new Error('No se encontraron <coordinates> en el KML.');
+        }
+
+        draw(gj);
+      }catch(err){
+        show('Error: '+err.message+
+             '<br>Prueba directo: <a style="color:#93c5fd" href="?data=baches.kml&debug=1">?data=baches.kml&debug=1</a>'+
+             '<button class="btn" onclick="location.reload()">Actualizar</button>');
+        console.error(err);
+      }
+    })();
+  </script>
+</body>
+</html>

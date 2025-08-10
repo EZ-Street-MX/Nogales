@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>EZ Street MX · Mapa de Bacheo</title>
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha512-VzLZWZ8G9b4xH4bY1GJj1A2UQHcQn8h7uO4muJQ6kO9ntrENyLxG0l9b8M1QwG4sQG2JkZ8Qf8t4nM2n9nJ8Sg==" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+:root{
+  --bg:#0f172a; /* slate-900 */
+  --panel:#111827; /* gray-900 */
+  --muted:#94a3b8; /* slate-400 */
+  --text:#e5e7eb; /* gray-200 */
+  --accent:#22d3ee; /* cyan-400 */
+  --ok:#10b981; /* emerald-500 */
+  --danger:#ef4444; /* red-500 */
+  --chip:#1f2937; /* gray-800 */
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:#0b1220;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;}
+header{
+  display:flex;gap:.5rem;align-items:center;padding:.5rem .75rem;border-bottom:1px solid #1e293b;background:linear-gradient(to bottom,#0b1220,#0f172a);
+  position:sticky;top:0;z-index:1000;
+}
+h1{font-size:1rem;margin:0;font-weight:600;letter-spacing:.2px;color:#e2e8f0}
+input[type="text"]{
+  width:min(520px,55vw);padding:.55rem .7rem;border:1px solid #243244;background:#0b1220;color:var(--text);border-radius:.5rem;outline:none;
+}
+button,.btn{
+  background:#111827;border:1px solid #263247;color:#e5e7eb;padding:.55rem .8rem;border-radius:.55rem;cursor:pointer;
+}
+button:hover{border-color:#334155}
+.btn-pill{border-radius:2rem;padding:.35rem .7rem}
+.btn-accent{background:#0ea5e9;border-color:#22d3ee}
+.btn-ghost{background:transparent;border-color:#1e293b}
+.badge{background:var(--chip);border:1px solid #1f2a3a;color:#cbd5e1;border-radius:999px;padding:.25rem .5rem;font-size:.8rem}
+.container{display:grid;grid-template-columns:320px 1fr 380px;gap:.75rem;height:calc(100% - 56px);}
+#left,#right{background:var(--panel);border-left:1px solid #1f2a37;border-right:1px solid #1f2a37;overflow:auto}
+#map{height:100%;width:100%;background:#000}
+#left{padding:.5rem}
+#right{padding:.75rem}
+.section-title{font-size:.85rem;color:#9fb2c8;margin:.5rem 0}
+.item{padding:.5rem;border-bottom:1px solid #1c2434;cursor:pointer}
+.item:hover{background:#0f1626}
+.item .name{font-weight:600}
+.item .sub{color:var(--muted);font-size:.85rem}
+.toolbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.flex{display:flex;gap:.5rem;align-items:center}
+.spacer{flex:1}
+.hidden{display:none!important}
+#search{width:100%;margin:.5rem 0}
+hr{border:0;border-top:1px solid #1c2434;margin:.75rem 0}
+.card{background:#0b1320;border:1px solid #1c2434;border-radius:.75rem;padding:.75rem}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:.35rem .75rem;align-items:center}
+.kv .k{color:#9fb2c8}
+.thumb-row{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}
+.thumb{height:120px;background:#0b111b;border:1px dashed #253148;border-radius:.6rem;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.actions{display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.5rem}
+.toggle{cursor:pointer;background:#0b1320;border:1px solid #1f2a3a;border-radius:.5rem;padding:.35rem .55rem}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#0b1320;border:1px solid #20324a;border-radius:.6rem;padding:.55rem .8rem;display:none;z-index:2000}
+.handle{position:absolute;top:50%;transform:translateY(-50%);width:14px;height:64px;background:#0b1220;border:1px solid #1f2a37;border-radius:0 .5rem .5rem 0;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.7}
+#left-handle{right:-14px}
+#right-handle{left:-14px;border-radius:.5rem 0 0 .5rem}
+.handle:hover{opacity:1}
+/* red dot marker */
+.red-dot{width:10px;height:10px;background:#ef4444;border-radius:999px;border:2px solid #111827;box-shadow:0 0 0 1px #ef4444aa}
+.leaflet-div-icon{background:transparent;border:0}
+/* responsive */
+@media (max-width:1100px){
+  .container{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}
+  #left{order:1;height:280px}
+  #map{order:2}
+  #right{order:3}
+  .handle{display:none}
+  input[type=text]{width:52vw}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>EZ Street MX · Mapa de Bacheo</h1>
+  <div class="spacer"></div>
+  <input id="kmlUrl" type="text" placeholder="KML (por defecto: baches.kml)" />
+  <button id="btnLoad">Cargar</button>
+  <label class="btn" style="position:relative;overflow:hidden">
+    <input id="fileInput" type="file" accept='.kml,.kmz' style="position:absolute;inset:0;opacity:0;cursor:pointer">
+    KML local
+  </label>
+  <button id="btnRefresh" class="btn-ghost">Actualizar</button>
+</header>
+
+<div class="container">
+  <div id="left">
+    <div class="actions">
+      <div class="flex">
+        <button id="btnToggleLeft" class="toggle">☰ Lista</button>
+        <span id="srcChip" class="badge">—</span>
+      </div>
+      <div class="flex">
+        <span id="countChip" class="badge">Listo: 0</span>
+      </div>
+    </div>
+    <input id="search" type="text" placeholder="Buscar bache…">
+    <label style="display:flex;gap:.5rem;align-items:center;font-size:.9rem;color:#9fb2c8">
+      <input type="checkbox" id="autoHideList"> Ocultar lista al seleccionar
+    </label>
+    <hr>
+    <div id="list"></div>
+    <div id="left-handle" class="handle">❯</div>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="right">
+    <div class="actions">
+      <div class="flex">
+        <button id="btnToggleRight" class="toggle">ℹ️ Panel</button>
+        <a id="btnMaps" class="btn btn-pill" href="#" target="_blank" rel="noopener">Ver en Maps</a>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title">FOTOS</div>
+      <div class="thumb-row">
+        <a class="thumb" id="img0" target="_blank" rel="noopener"><span style="color:#64748b">Antes</span></a>
+        <a class="thumb" id="img1" target="_blank" rel="noopener"><span style="color:#64748b">Referencia</span></a>
+        <a class="thumb" id="img2" target="_blank" rel="noopener"><span style="color:#64748b">Final</span></a>
+      </div>
+    </div>
+    <div style="height:.75rem"></div>
+    <div class="card">
+      <div class="section-title">MEDIDAS</div>
+      <div class="kv">
+        <div class="k">Ancho</div><div id="vAncho">—</div>
+        <div class="k">Largo</div><div id="vLargo">—</div>
+        <div class="k">Tipo</div><div id="vTipo">—</div>
+        <div class="k"># Bache</div><div id="vNum">—</div>
+        <div class="k">Cadenamiento</div><div id="vCad">—</div>
+        <div class="k">Colonia</div><div id="vCol">—</div>
+        <div class="k">Calle</div><div id="vCalle">—</div>
+        <div class="k">Entre calles</div><div id="vEntre">—</div>
+      </div>
+    </div>
+    <div id="right-handle" class="handle">❮</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha512-o9N1jG8C5szV4nNI4Y2LxO4Qx2UYbY9rYv7FpC18JNpDutZCRa14Q6gttxyPjdvVSxGInxjeRGna43EIBuE5Ug==" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+// Helpers
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+const toast = (msg, t=2200)=>{const el=$("#toast"); el.textContent=msg; el.style.display='block'; setTimeout(()=>el.style.display='none', t)};
+const qs = new URLSearchParams(location.search);
+const store = (k,v)=>localStorage.setItem(k,JSON.stringify(v));
+const load = (k,d)=>{try{const v=localStorage.getItem(k); return v?JSON.parse(v):d}catch{ return d }};
+
+let map, osm, esri, markers, features=[], srcUrl='';
+let selected=null;
+
+function initMap(){
+  map = L.map('map',{zoomControl:false,renderer:L.canvas(),minZoom:3,maxZoom:21});
+  // Base: Esri Sat (19-20) + OSM fallback
+  esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 20, attribution:'&copy; Esri, Maxar'
+  }).addTo(map);
+  osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom: 20, attribution:'&copy; OpenStreetMap'
+  });
+  esri.on('tileerror',()=>{ if(!map.hasLayer(osm)){ osm.addTo(map); toast('Capa satélite no disponible, usando calles.'); } });
+  L.control.layers({"Satélite":esri,"Calles":osm},{},{position:'bottomright'}).addTo(map);
+  // cluster
+  markers = L.markerClusterGroup({ chunkedLoading:true, disableClusteringAtZoom:20, maxClusterRadius:40 });
+  map.addLayer(markers);
+  // zoom buttons minimal (hidden by default)
+  // L.control.zoom({position:'topleft'}).addTo(map);
+  map.setView([29.09,-110.96], 12);
+}
+initMap();
+
+// Red dot icon
+const redIcon = L.divIcon({className:'', html:'<div class="red-dot"></div>', iconSize:[14,14], iconAnchor:[7,7]});
+
+// UI persistence
+const collapseLeft = load('nog_left_collapsed', false);
+const collapseRight = load('nog_right_collapsed', false);
+if(collapseLeft) $("#left").classList.add('hidden');
+if(collapseRight) $("#right").classList.add('hidden');
+$("#autoHideList").checked = load('nog_autoHide', false);
+$("#btnToggleLeft").onclick = ()=>{ $("#left").classList.toggle('hidden'); store('nog_left_collapsed',$("#left").classList.contains('hidden')); };
+$("#btnToggleRight").onclick = ()=>{ $("#right").classList.toggle('hidden'); store('nog_right_collapsed',$("#right").classList.contains('hidden')); };
+$("#left-handle").onclick = $("#btnToggleLeft").onclick;
+$("#right-handle").onclick = $("#btnToggleRight").onclick;
+$("#autoHideList").onchange = e=> store('nog_autoHide', e.target.checked);
+
+// Build list
+function renderList(items){
+  const list=$("#list"); list.innerHTML='';
+  items.forEach((f,i)=>{
+    const div=document.createElement('div');
+    div.className='item';
+    div.innerHTML=`<div class="name">${(f.props.name||'Bache')}</div>
+      <div class="sub">${fmtCoords(f.lat,f.lon)} ${(f.props.Calle||'')}</div>`;
+    div.onclick=()=>focusFeature(f,true);
+    list.appendChild(div);
+  });
+  $("#countChip").textContent = `Listo: ${items.length}`;
+}
+// Coords formatting
+function fmtCoords(lat,lon){ return (lat && lon) ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : '' }
+function openMaps(lat,lon){ return `https://www.google.com/maps?q=${lat},${lon}` }
+
+// Image proxy fallback
+function proxied(u){
+  try{
+    const url=new URL(u);
+    const naked = url.href.replace(/^https?:\/\//,'');
+    return `https://images.weserv.nl/?url=${encodeURIComponent(naked)}`;
+  }catch{return u}
+}
+
+// Fill detail panel
+function fillPanel(f){
+  selected=f;
+  $("#btnMaps").href = (f.lat && f.lon)? openMaps(f.lat,f.lon) : '#';
+
+  const get = k => {
+    const v = f.props[k] ?? f.props[k.toLowerCase()] ?? f.props[k.toUpperCase()];
+    return v ?? '—';
+  };
+  $("#vAncho").textContent = get('Ancho');
+  $("#vLargo").textContent = get('Largo');
+  $("#vTipo").textContent  = get('Tipo')==='—'? (get('Tipo de trabajo')||'—') : get('Tipo');
+  $("#vNum").textContent   = get('Numero de Bache')==='—'? (get('NumBache')||'—') : get('Numero de Bache');
+  $("#vCad").textContent   = get('Cadenamiento');
+  $("#vCol").textContent   = get('Colonia');
+  $("#vCalle").textContent = get('Calle');
+  $("#vEntre").textContent = get('EntreCalles')==='—'? (get('Entre calles')||'—') : get('EntreCalles');
+
+  const imgs = (f.photos||[]).slice(0,3);
+  [0,1,2].forEach(i=>{
+    const a = $("#img"+i); a.innerHTML=''; a.removeAttribute('href');
+    if(imgs[i]){
+      const img=document.createElement('img'); img.loading='lazy'; img.src=imgs[i];
+      img.onerror=()=>{ img.onerror=null; img.src = proxied(imgs[i]); };
+      a.appendChild(img); a.href=imgs[i];
+    }else{
+      a.innerHTML = `<span style="color:#64748b">${i==0?'Antes':i==1?'Referencia':'Final'}</span>`;
+    }
+  });
+}
+
+// Focus on a feature
+function focusFeature(f,fromList=false){
+  if(f.lat && f.lon) map.setView([f.lat,f.lon], Math.max(18,map.getZoom()));
+  if($("#autoHideList").checked && fromList) $("#left").classList.add('hidden');
+  fillPanel(f);
+}
+
+// Parse KML (robusto)
+function parseKml(text){
+  const xml = new DOMParser().parseFromString(text,"text/xml");
+  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+  const out = [];
+  placemarks.forEach(pm=>{
+    // props
+    const props = {};
+    const name = pm.getElementsByTagName('name')[0]?.textContent?.trim();
+    if(name) props.name=name;
+
+    // ExtendedData / SimpleData
+    pm.querySelectorAll('ExtendedData Data, ExtendedData SimpleData').forEach(n=>{
+      const k = (n.getAttribute('name')||'').trim();
+      const v = (n.textContent||'').trim();
+      if(k) props[k]=v;
+    });
+    // description table (TD-kv)
+    const desc = pm.getElementsByTagName('description')[0]?.textContent||'';
+    if(desc.includes('<td')){
+      const td = new DOMParser().parseFromString(desc,'text/html');
+      const tds = Array.from(td.querySelectorAll('td'));
+      for(let i=0;i<tds.length-1;i+=2){
+        const k = tds[i].textContent.trim().replace(/[:：]$/,'');
+        const v = tds[i+1].textContent.trim();
+        if(k) props[k]=v;
+      }
+      // also image links in description
+      td.querySelectorAll('img,a').forEach(el=>{
+        const u = el.getAttribute('src')||el.getAttribute('href');
+        if(u && /\.(jpe?g|png|webp)$/i.test(u)) props['__img__'+(Math.random())]=u;
+      });
+    }
+
+    // geometry
+    let lat=null, lon=null, geomType='point', coords=[];
+
+    const pc = pm.getElementsByTagName('Point')[0]?.getElementsByTagName('coordinates')[0]?.textContent;
+    if(pc){
+      const [lo,la] = pc.trim().split(',').map(Number);
+      if(isFinite(la)&&isFinite(lo)){ lat=la; lon=lo; }
+    }else{
+      const ls = pm.getElementsByTagName('LineString')[0]?.getElementsByTagName('coordinates')[0]?.textContent;
+      const pg = pm.getElementsByTagName('Polygon')[0]?.getElementsByTagName('coordinates')[0]?.textContent;
+      const raw = (ls||pg||'').trim();
+      if(raw){
+        geomType = ls?'line':'polygon';
+        raw.split(/\s+/).forEach(x=>{
+          const [lo,la] = x.split(',').map(Number);
+          if(isFinite(la)&&isFinite(lo)) coords.push([la,lo]);
+        });
+        if(coords.length){
+          const latArr=coords.map(c=>c[0]), lonArr=coords.map(c=>c[1]);
+          lat = (Math.min(...latArr)+Math.max(...latArr))/2;
+          lon = (Math.min(...lonArr)+Math.max(...lonArr))/2;
+        }
+      }
+    }
+    // collect photo urls from props
+    const urls = Object.values(props).filter(v=>typeof v==='string' && /(https?:\/\/[^\s"']+)/i.test(v))
+      .flatMap(v=> v.match(/https?:\/\/[^\s"']+/gi) || [])
+      .filter(u=> /\.(jpe?g|png|webp)$/i.test(u) || /\/forms\/images\//.test(u))
+      .filter((u,i,arr)=> arr.indexOf(u)===i );
+
+    out.push({ props, lat, lon, geomType, coords, photos: urls });
+  });
+  return out;
+}
+
+// Draw features to map
+function draw(features){
+  markers.clearLayers();
+  const group = L.featureGroup();
+  features.forEach(f=>{
+    if(f.lat && f.lon){
+      const m = L.marker([f.lat,f.lon],{icon:redIcon});
+      m.on('click',()=>focusFeature(f,false));
+      markers.addLayer(m);
+      group.addLayer(m);
+    }else if(f.coords?.length){
+      const layer = f.geomType==='line' ? L.polyline(f.coords,{color:'#38bdf8'}) : L.polygon(f.coords,{color:'#34d399',fillColor:'#10b981',fillOpacity:.2});
+      layer.on('click',()=>focusFeature(f,false));
+      layer.addTo(map); group.addLayer(layer);
+    }
+  });
+  if(group.getLayers().length){
+    try{ map.fitBounds(group.getBounds().pad(0.2)); }catch{}
+  }
+}
+
+// Load from URL
+async function loadUrl(url){
+  try{
+    $("#srcChip").textContent = new URL(url, location.href).href;
+  }catch{
+    $("#srcChip").textContent = url;
+  }
+  toast('Cargando KML…');
+  const u = url + (url.includes('?')?'&':'?') + 't=' + Date.now();
+  const res = await fetch(u, {cache:'no-store'});
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  features = parseKml(text);
+  if(!features.length) throw new Error('Sin Placemarks');
+  renderList(features); draw(features); fillPanel(features[0]); selected=features[0];
+  toast('Listo.');
+}
+
+// Load local file (KML or KMZ)
+async function loadLocal(file){
+  const name = file.name.toLowerCase();
+  if(name.endsWith('.kmz')){
+    toast('Leyendo KMZ…');
+    // lazy load JSZip
+    const jss = document.createElement('script');
+    jss.src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
+    await new Promise(r=>{jss.onload=r; document.head.appendChild(jss)});
+    const buf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const kmlEntry = Object.keys(zip.files).find(n=>n.toLowerCase().endsWith('.kml'));
+    if(!kmlEntry) throw new Error('KMZ sin KML interno');
+    const text = await zip.files[kmlEntry].async('text');
+    features = parseKml(text);
+  }else{
+    const text = await file.text();
+    features = parseKml(text);
+  }
+  renderList(features); draw(features); fillPanel(features[0]); selected=features[0];
+  $("#srcChip").textContent = 'archivo local';
+  toast('Listo.');
+}
+
+// Events
+$("#btnLoad").onclick = ()=>{
+  const url = $("#kmlUrl").value.trim() || 'baches.kml';
+  srcUrl = url; store('nog_last_url', url);
+  loadUrl(url).catch(e=>toast('Error: '+e.message));
+};
+$("#btnRefresh").onclick = ()=>{
+  const url = srcUrl || load('nog_last_url','baches.kml');
+  loadUrl(url).catch(e=>toast('Error: '+e.message));
+};
+$("#fileInput").addEventListener('change', (e)=>{
+  const f=e.target.files[0]; if(!f) return;
+  loadLocal(f).catch(err=>toast('Error: '+err.message));
+  e.target.value='';
+});
+$("#search").oninput = e=>{
+  const q=e.target.value.toLowerCase();
+  const subset = features.filter(f=> JSON.stringify(f).toLowerCase().includes(q));
+  renderList(subset);
+};
+
+// Boot: params & last
+(function boot(){
+  const u = qs.get('data') || load('nog_last_url', 'baches.kml');
+  $("#kmlUrl").value = u; srcUrl=u;
+  const q = qs.get('q'); if(q){ $("#search").value = q; }
+  if(qs.get('v')==='osm'){ osm.addTo(map); } // force calles
+  loadUrl(u).catch(e=>toast('Error: '+e.message));
+})();
+</script>
+</body>
+</html>

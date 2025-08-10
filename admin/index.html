@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa de Baches · robusto</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html,body,#map{height:100%;margin:0}
+  .hud{position:fixed;left:12px;bottom:12px;background:#111827;color:#fff;
+       padding:8px 10px;border-radius:10px;font:12px system-ui;opacity:.9;max-width:420px}
+  .hud b{color:#67e8f9}
+  .btn{cursor:pointer;background:#0b1220;border:1px solid #233146;border-radius:8px;padding:6px 10px;margin-left:8px;color:#d1d5db}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/togeojson@0.16.0/dist/togeojson.umd.js"></script>
+<script>
+  if(!window.toGeoJSON && !window.togeojson){
+    document.write('<script src="https://unpkg.com/togeojson/dist/togeojson.umd.js"><\\/script>');
+  }
+</script>
+</head>
+<body>
+<div id="map"></div>
+<div id="hud" class="hud" style="display:none"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map').setView([31.307, -110.948], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:20}).addTo(map);
+
+const hud = document.getElementById('hud');
+const qp  = new URLSearchParams(location.search);
+const url = qp.get('data') || 'baches.kml';
+const debug = qp.has('debug');
+
+function show(s){ hud.innerHTML = s; hud.style.display='block'; }
+
+async function fetchText(u){
+  const res = await fetch(u + (u.includes('?')?'&':'?') + 't=' + Date.now());
+  if(!res.ok) throw new Error('HTTP '+res.status+' '+u);
+  return await res.text();
+}
+
+function kmlFallbackToGeoJSON(kmlText){
+  // Very simple: only <Placemark><Point><coordinates>lon,lat[,z]
+  const features = [];
+  const rx = /<Placemark[\s\S]*?<Point>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/Point>[\s\S]*?<\/Placemark>/gi;
+  let m; let count=0;
+  while((m = rx.exec(kmlText))){
+    const txt = m[1].trim();
+    const parts = txt.split(',').map(Number);
+    if(parts.length >= 2 && isFinite(parts[0]) && isFinite(parts[1])){
+      const lon = parts[0], lat = parts[1];
+      features.push({ type:'Feature', geometry:{ type:'Point', coordinates:[lon,lat] }, properties:{} });
+      count++;
+    }
+  }
+  return { type:'FeatureCollection', features, _fallbackCount:count };
+}
+
+function draw(gj){
+  const layer = L.geoJSON(gj, {pointToLayer:(_,ll)=>L.circleMarker(ll,{radius:6})}).addTo(map);
+  try{ map.fitBounds(layer.getBounds().pad(0.2)); }catch{}
+  const n = gj.features?.length ?? 0;
+  if(debug) show('Cargado <b>'+n+'</b> punto(s) desde '+url+(gj._fallbackCount!=null?' · modo <b>fallback</b>':'')+
+                '<button class="btn" onclick="location.reload()">Actualizar</button>');
+}
+
+(async()=>{
+  try{
+    const txt = await fetchText(url);
+    // try togeojson first if available
+    const hasTG = !!(window.toGeoJSON || window.togeojson);
+    let gj = null;
+    if(hasTG){
+      try{
+        const xml = new DOMParser().parseFromString(txt,'text/xml');
+        const TG = window.toGeoJSON || window.togeojson;
+        gj = TG.kml(xml);
+      }catch(e){
+        if(debug) show('Fallo togeojson, usando fallback: '+e.message);
+      }
+    }
+    if(!gj || !gj.features || gj.features.length===0){
+      // fallback parser
+      const gj2 = kmlFallbackToGeoJSON(txt);
+      if((gj2.features||[]).length>0){ draw(gj2); return; }
+      throw new Error('No se encontraron <coordinates> en el KML.');
+    }
+    draw(gj);
+  }catch(err){
+    show('Error: '+err.message+
+         '<br>Prueba el simple directo: <a style="color:#93c5fd" href="?data=baches.kml&debug=1">?data=baches.kml&debug=1</a>');
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EZ Street MX · Mapa de Bacheo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+4wT2bRykWUG5kyRjO6jwxlhpQ0iK7Hf2z8GZ8JbM=" crossorigin="anonymous">
+<style>
+  :root{
+    --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e2e8f0; --accent:#22d3ee;
+  }
+  html,body,#app{height:100%;margin:0;background:#0b1220;color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
+  #map{position:absolute;inset:0 380px 0 0;}
+  aside{position:absolute;top:0;right:0;width:380px;height:100%;background:linear-gradient(180deg,#0b1220,#0b1220ca 90%);
+        border-left:1px solid #1f2937;display:flex;flex-direction:column;backdrop-filter: blur(6px);}
+  header{display:flex;gap:.5rem;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:1px solid #1f2937}
+  header .title{font-weight:700;}
+  .row{display:flex;gap:.5rem;align-items:center}
+  label,input,button,select{font:inherit}
+  input[type="text"]{background:#0b1220;border:1px solid #222; color:var(--text); padding:.4rem .6rem;border-radius:.5rem; width:100%}
+  button{background:#0b1220;border:1px solid #222;color:var(--text);padding:.45rem .7rem;border-radius:.5rem;cursor:pointer}
+  button:hover{border-color:#374151}
+  #panel{padding: .75rem 1rem; overflow:auto}
+  .photos{display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; margin:.6rem 0 1rem}
+  .ph{background:#0b1220;border:1px solid #1f2937; border-radius:.6rem; height:120px; display:flex; align-items:center; justify-content:center; overflow:hidden}
+  .ph img{width:100%;height:100%;object-fit:cover; display:block}
+  .grid{display:grid;grid-template-columns:auto 1fr; gap:.35rem .8rem; background:#0b1220;border:1px solid #1f2937;border-radius:.6rem;padding:.8rem}
+  .k{color:var(--muted)}
+  .pill{display:inline-flex;align-items:center; gap:.35rem; background:#0b1220;border:1px solid #1f2937; padding:.25rem .5rem; border-radius:999px}
+  .pill .dot{width:.55rem;height:.55rem;border-radius:50%; background:#ef4444; border:1px solid #fecaca}
+  .muted{color:var(--muted)}
+  @media (max-width:920px){
+    #map{inset:340px 0 0 0}
+    aside{width:100%; height:340px; bottom:auto}
+  }
+  /* Leaflet tweaks */
+  .leaflet-control-zoom{display:none} /* ocultar + y - */
+  .leaflet-container{background:#000}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <aside>
+    <header>
+      <span class="title">EZ Street MX · Mapa de Bacheo</span>
+      <div class="row" style="gap:.4rem">
+        <select id="kmlSel" title="KML por defecto: baches.kml">
+          <option value="baches.kml">baches.kml</option>
+          <option value="baches_demo_nogales.kml">baches_demo_nogales.kml</option>
+        </select>
+        <button id="btnLoad">Cargar</button>
+        <button id="btnRefresh">Actualizar</button>
+      </div>
+    </header>
+    <div id="panel">
+      <div class="muted">Selecciona un bache…</div>
+      <div class="photos" style="display:none">
+        <a class="ph" id="ph0" target="_blank" rel="noopener"><span class="muted">Antes</span></a>
+        <a class="ph" id="ph1" target="_blank" rel="noopener"><span class="muted">Referencia</span></a>
+        <a class="ph" id="ph2" target="_blank" rel="noopener"><span class="muted">Final</span></a>
+      </div>
+      <div class="grid" style="display:none" id="meta">
+        <div class="k">Ancho</div><div id="fAncho">—</div>
+        <div class="k">Largo</div><div id="fLargo">—</div>
+        <div class="k">Tipo</div><div id="fTipo">—</div>
+        <div class="k"># Bache</div><div id="fNum">—</div>
+        <div class="k">Cadenamiento</div><div id="fCad">—</div>
+        <div class="k">Colonia</div><div id="fCol">—</div>
+        <div class="k">Calle</div><div id="fCalle">—</div>
+        <div class="k">Entre calles</div><div id="fEntre">—</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j/rzP0lH0v7QnLk0q2gS2aQmG8v7+syCF2s3nCE=" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/togeojson@5.7.0/dist/togeojson.umd.js"></script>
+<script>
+const map = L.map('map', {
+  zoomControl:false,
+  maxZoom: 22,
+});
+const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 22, maxNativeZoom: 19, attribution: 'Esri, Maxar, Earthstar Geographics'
+}).addTo(map);
+map.setView([31.308, -110.94], 13);
+
+let layer;
+const redStyle = {
+  radius: 5, color:'#991b1b', weight:1, fillColor:'#ef4444', fillOpacity:.9
+};
+
+function cleanURL(u){
+  if(!u) return '';
+  u = (''+u).trim().replace(/^"(.*)"$/,'$1');
+  // Google Drive view -> direct
+  const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/);
+  if(m) return 'https://drive.google.com/uc?export=view&id='+m[1];
+  return u;
+}
+function bestImgURL(u){
+  const direct = cleanURL(u);
+  if(!direct) return '';
+  // primary: direct (no-referrer)
+  return direct;
+}
+function setImg(anchor, url, label){
+  const el = document.getElementById(anchor);
+  el.innerHTML='';
+  if(!url){ el.textContent = label; el.classList.add('muted'); el.removeAttribute('href'); return; }
+  const img = new Image();
+  img.loading='lazy';
+  img.referrerPolicy='no-referrer'; // evita 403 por referer
+  img.alt = label;
+  img.onerror = () => {
+    // fallback 1: images.weserv (sin esquema y sin encode para evitar 400)
+    try{
+      const stripped = url.replace(/^https?:\/\//,'');
+      img.src = 'https://images.weserv.nl/?url=ssl:'+ stripped;
+    }catch(e){}
+    img.onerror = () => {
+      // fallback 2: rsproxy (simple passthrough)
+      img.src = 'https://r.jina.ai/http://' + url.replace(/^https?:\/\//,'');
+    };
+  };
+  img.src = url;
+  el.appendChild(img);
+  el.href = url;
+}
+
+function showInfo(p){
+  const props = p.properties || {};
+  // Fotos
+  const fotos = [props.Fotoantes||props.fotoantes||props.FotoAntes,
+                 props.FotoReferencia||props.fotoreferencia||props.FotoRef,
+                 props.FotoFinal||props.fotofinal||props.FotoDespues];
+  const any = fotos.some(Boolean);
+  document.querySelector('.photos').style.display = any ? 'grid':'none';
+  ['ph0','ph1','ph2'].forEach((id,i)=>setImg(id, bestImgURL(fotos[i]||''), ['Antes','Referencia','Final'][i]));
+  // Campos
+  const $ = s=>document.getElementById(s).textContent;
+  document.getElementById('meta').style.display='grid';
+  document.getElementById('fAncho').textContent = props.Ancho ?? '—';
+  document.getElementById('fLargo').textContent = props.Largo ?? '—';
+  document.getElementById('fTipo').textContent = props.TipoDeTrabajo || props.Tipo || '—';
+  document.getElementById('fNum').textContent = props.NumeroDeBache || props.NumBache || '—';
+  document.getElementById('fCad').textContent = props.Cadenamiento || '—';
+  document.getElementById('fCol').textContent = props.Colonia || '—';
+  document.getElementById('fCalle').textContent = props.Calle || '—';
+  document.getElementById('fEntre').textContent = props.Entrecalles || props.EntreCalles || '—';
+}
+
+async function loadKML(url){
+  const t0 = Date.now();
+  try{
+    const qs = new URLSearchParams(location.search);
+    const via = qs.get('data') || url || 'baches.kml';
+    const cacheBust = qs.get('t') || Date.now();
+    const kmlUrl = via + (via.includes('?')?'&':'?') + 't=' + cacheBust;
+    const res = await fetch(kmlUrl, {cache:'no-store'});
+    const txt = await res.text();
+    const dom = new DOMParser().parseFromString(txt, 'text/xml');
+    const gj = toGeoJSON.kml(dom);
+    if(layer) layer.remove();
+    layer = L.geoJSON(gj, {
+      pointToLayer: (f, latlng)=> L.circleMarker(latlng, redStyle),
+      onEachFeature: (f, lyr)=>{
+        lyr.on('click', ()=> showInfo(f));
+      }
+    }).addTo(map);
+    try{ map.fitBounds(layer.getBounds(), {padding:[20,20]}); }catch(e){}
+    console.log('KML cargado en', Date.now()-t0, 'ms');
+  }catch(err){
+    console.error(err);
+    alert('No se pudo cargar el KML.');
+  }
+}
+
+document.getElementById('btnLoad').onclick = ()=> loadKML(document.getElementById('kmlSel').value);
+document.getElementById('btnRefresh').onclick = ()=> location.href = location.pathname + '?t=' + Date.now();
+window.addEventListener('DOMContentLoaded', ()=> loadKML(document.getElementById('kmlSel').value));
+</script>
+</body>
+</html>

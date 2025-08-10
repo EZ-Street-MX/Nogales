@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EZ Street MX · Mapa de Bacheo</title>
+<link rel="preconnect" href="https://unpkg.com">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  :root{
+    --bg:#0b1620;
+    --panel:#111c28;
+    --accent:#20c997;
+    --muted:#8ba0b3;
+    --chip:#202e3d;
+  }
+  html,body{height:100%;margin:0;background:#071018;color:#e6eef8;font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;}
+  .app{display:grid;grid-template-rows:auto 1fr; height:100%;}
+  header{
+    background:#0b1620; color:#e6eef8; padding:10px 14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    box-shadow:0 1px 0 rgba(255,255,255,.06);
+  }
+  header h1{font-size:18px;margin:0 8px 0 0;white-space:nowrap}
+  header .controls{display:flex;gap:8px;align-items:center;flex:1;min-width:220px}
+  header input[type=text]{
+    width:320px; max-width:60vw; min-width:180px;
+    background:#0f1a26; border:1px solid #1e2a38; color:#cfe6ff; border-radius:10px; padding:10px 12px;
+  }
+  header button{
+    background:#142234; border:1px solid #223246; color:#e6eef8; padding:9px 14px; border-radius:12px; cursor:pointer;
+  }
+  #map{width:100%;height:100%}
+  /* drawers */
+  .drawer{position:fixed; z-index:990; background:var(--panel); color:#e6eef8; box-shadow:0 10px 30px rgba(0,0,0,.35); border-radius:18px; overflow:hidden}
+  .drawer h3{margin:0 0 6px 0; font-weight:600}
+  .drawer.content{padding:14px}
+  /* left list (desktop) */
+  #listDrawer{top:76px; left:16px; width:340px; height:70vh; display:flex; flex-direction:column}
+  #listDrawer header{padding:10px 12px; background:#0f1a26; display:flex; gap:8px; align-items:center}
+  #search{flex:1; padding:8px 10px; border-radius:10px; background:#0b1620; border:1px solid #213246; color:#cfe6ff}
+  #list{overflow:auto; padding:8px 12px; gap:6px; display:flex; flex-direction:column}
+  .row{padding:10px 10px; border-radius:10px; background:#0d1925; border:1px solid #1d2a3c; cursor:pointer}
+  .row:hover{background:#122235}
+  .row small{color:#8ba0b3}
+  /* right detail (desktop) */
+  #detailDrawer{top:76px; right:16px; width:420px; height:70vh; display:flex; flex-direction:column}
+  #detail{overflow:auto; padding:12px 14px}
+  .photos{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px}
+  .ph{background:#0b1620; border:1px solid #1e2a38; border-radius:12px; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center; overflow:hidden}
+  .ph img{width:100%; height:100%; object-fit:cover; display:block}
+  .pill{display:inline-block; padding:6px 10px; border-radius:999px; background:#1a2a3b; color:#cfe6ff; font-size:12px; margin-right:6px}
+  .kv{display:grid; grid-template-columns:140px 1fr; gap:8px 12px; margin-top:10px}
+  .kv label{color:#9ab1c8}
+  .hide{display:none !important}
+  /* mobile */
+  .fab{position:fixed; z-index:991; bottom:18px; padding:10px 14px; background:#0f1a26; color:#e6eef8; border:1px solid #223246; border-radius:999px}
+  #btnList{left:18px}
+  #btnDetail{right:18px}
+  @media (max-width: 900px){
+    header .controls{order:3; width:100%}
+    #listDrawer{display:none}
+    #detailDrawer{display:none}
+    /* bottom sheets */
+    .sheet{position:fixed; left:0; right:0; bottom:0; background:var(--panel); border-radius:18px 18px 0 0;
+           box-shadow:0 -12px 30px rgba(0,0,0,.45); transform:translateY(100%); transition:transform .25s ease; z-index:990}
+    .sheet.open{transform:translateY(0)}
+    #sheetList{height:52vh}   /* list sheet height */
+    #sheetDetail{height:52vh} /* detail sheet height ~ half screen as requested */
+    .sheet .body{height:100%; overflow:auto; padding:12px 14px}
+    .photos{grid-template-columns:repeat(3, 1fr)}
+    .fab{display:block}
+  }
+  @media (min-width: 901px){
+    .fab{display:none}
+  }
+  /* red dot marker */
+  .red-dot{
+    background:#111; border:2px solid #f03d3d; width:16px; height:16px; border-radius:999px;
+    box-shadow:0 0 0 2px rgba(0,0,0,.25); transform:translate(-8px,-8px);
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>EZ Street MX · Mapa de Bacheo</h1>
+    <div class="controls">
+      <input id="dataUrl" type="text" placeholder="KML (por defecto: baches.kml)" />
+      <button id="btnLoad">Cargar</button>
+      <button id="btnLocal">KML local</button>
+      <button id="btnReload">Actualizar</button>
+    </div>
+  </header>
+  <div id="map"></div>
+</div>
+
+<!-- Desktop drawers -->
+<aside id="listDrawer" class="drawer">
+  <header>
+    <input id="search" placeholder="Buscar bache…" />
+    <label style="display:flex;align-items:center;gap:6px;color:#9ab1c8;font-size:12px">
+      <input type="checkbox" id="chkHideOnSelect" /> Ocultar lista al seleccionar
+    </label>
+  </header>
+  <div id="list"></div>
+</aside>
+
+<aside id="detailDrawer" class="drawer">
+  <div id="detail"></div>
+</aside>
+
+<!-- Mobile sheets -->
+<div id="sheetList" class="sheet">
+  <div class="body">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <span class="pill">Lista</span>
+      <input id="mSearch" placeholder="Buscar bache…" style="flex:1;padding:8px 10px;border-radius:10px;background:#0b1620;border:1px solid #213246;color:#cfe6ff">
+      <label style="display:flex;align-items:center;gap:6px;color:#9ab1c8;font-size:12px">
+        <input type="checkbox" id="mHideOnSelect" /> Ocultar al seleccionar
+      </label>
+    </div>
+    <div id="mList"></div>
+  </div>
+</div>
+
+<div id="sheetDetail" class="sheet">
+  <div class="body" id="mDetail"></div>
+</div>
+
+<!-- FABs (mobile) -->
+<button id="btnList" class="fab">Lista</button>
+<button id="btnDetail" class="fab">Panel</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+const isMobile = matchMedia('(max-width: 900px)').matches;
+
+const map = L.map('map', {
+  zoomControl:false,
+  minZoom: 2,
+  maxZoom: 22
+}).setView([31.297, -110.94], 13);
+
+// Esri Satellite
+L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: '<a href="https://leafletjs.com">Leaflet</a> | © Esri', maxZoom:22
+}).addTo(map);
+
+L.control.zoom({position:'topright'}).addTo(map);
+
+// helpers
+const qs = (sel,root=document)=>root.querySelector(sel);
+const qsa = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
+function getParam(name, fallback){ const u=new URL(location.href); return u.searchParams.get(name)||fallback; }
+
+// image src normalizer with CORS-safe proxy
+function safeImg(url){
+  if(!url) return '';
+  try{
+    // trimble and most external hosts block hotlinking; use wsrv.nl (images.weserv)
+    const u = new URL(url);
+    return 'https://wsrv.nl/?url=' + encodeURIComponent(u.href);
+  }catch(e){
+    return url;
+  }
+}
+
+function cleanVal(v){
+  if(!v) return '';
+  v = v.replace(/&nbsp;|<br\s*\/?>/gi,' ').replace(/\s+/g,' ').trim();
+  return v === '-' ? '' : v;
+}
+
+// parse description HTML table to object + photos
+function parseDesc(html){
+  if(!html) return {photos:[], data:{}};
+  const div = document.createElement('div');
+  div.innerHTML = html;
+
+  const data = {};
+  const rows = qsa('tr', div);
+  rows.forEach(tr=>{
+    const th = qs('th', tr);
+    const td = qs('td', tr);
+    if(!th || !td) return;
+    const k = th.textContent.trim().toLowerCase();
+    const v = cleanVal(td.textContent);
+    if(!v) return;
+    if(k.includes('tipo')) data.tipo = v;
+    else if(k.includes('ancho')) data.ancho = v;
+    else if(k.includes('largo')) data.largo = v;
+    else if(k.includes('número') || k.includes('#') || k.includes('num')) data.numero = v;
+    else if(k.includes('cadena') || k.includes('cadenamiento')) data.cadenamiento = v;
+    else if(k.includes('colonia')) data.colonia = v;
+    else if(k.includes('calle') && !k.includes('entre')) data.calle = v;
+    else if(k.includes('entre calles') || k.includes('entre')) data.entre = v;
+  });
+
+  const links = qsa('a[href]', div).map(a=>a.getAttribute('href')).filter(Boolean);
+  // pick first 3 unique-looking links
+  const photos = [];
+  for(const ln of links){
+    if(photos.length>=3) break;
+    if(/\.(jpe?g|png|webp)(\?|$)/i.test(ln) || ln.includes('/forms/images/')) photos.push(ln);
+  }
+  return {photos, data};
+}
+
+// UI rendering
+function rowHTML(p, idx){
+  const title = p.name || `kml_${idx+1}`;
+  const pos = p.lat.toFixed(6)+', '+p.lng.toFixed(6);
+  const street = p.data?.calle ? ' · '+p.data.calle : '';
+  return `<div class="row" data-idx="${idx}"><b>${title}</b><br><small>${pos}${street}</small></div>`;
+}
+
+function detailHTML(p){
+  const d = p.data||{};
+  // photos
+  const phs = (p.photos||[]).map(u=>`<div class="ph"><img referrerpolicy="no-referrer" loading="lazy" src="${safeImg(u)}"></div>`).join('') || '';
+  const photos = `<div class="photos">${phs}</div>`;
+
+  function kv(label, val){
+    if(!val) return '';
+    return `<label>${label}</label><div>${val}</div>`;
+  }
+  const kvs = [
+    kv('Ancho', d.ancho),
+    kv('Largo', d.largo),
+    kv('Tipo', d.tipo),
+    kv('# Bache', d.numero),
+    kv('Cadenamiento', d.cadenamiento),
+    kv('Colonia', d.colonia),
+    kv('Calle', d.calle),
+    kv('Entre calles', d.entre),
+  ].join('');
+
+  const title = `<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px">
+      <span class="pill">${p.name||'Baches'}</span>
+      <a target="_blank" rel="noopener" class="pill" href="https://www.google.com/maps?q=${p.lat},${p.lng}">Ver en Maps</a>
+    </div>`;
+
+  return `${title}${photos}<div class="kv">${kvs||'<span style="color:#9ab1c8">Sin datos</span>'}</div>`;
+}
+
+// state
+let points = [];
+const cluster = L.markerClusterGroup({ showCoverageOnHover:false, spiderfyOnMaxZoom:true, maxClusterRadius:40 });
+
+function addPoints(arr){
+  cluster.clearLayers();
+  points = arr;
+  arr.forEach((p, idx)=>{
+    const icon = L.divIcon({className:'red-dot'});
+    const m = L.marker([p.lat, p.lng], {icon});
+    m.on('click', ()=> selectIdx(idx));
+    cluster.addLayer(m);
+  });
+  map.addLayer(cluster);
+  if(arr.length){
+    const b = L.latLngBounds(arr.map(p=>[p.lat,p.lng]));
+    map.fitBounds(b.pad(.2));
+  }
+  renderLists();
+}
+
+function selectIdx(idx){
+  const p = points[idx];
+  if(!p) return;
+  // desktop
+  const d = qs('#detail');
+  if(d){ d.innerHTML = detailHTML(p); }
+  // mobile
+  qs('#mDetail').innerHTML = detailHTML(p);
+  if(isMobile){
+    openSheet('detail');
+    if(qs('#mHideOnSelect').checked) closeSheet('list');
+  }else{
+    // optional: auto-hide left list if checked
+    if(qs('#chkHideOnSelect').checked) qs('#listDrawer').style.display='none';
+    qs('#detailDrawer').style.display='flex';
+  }
+}
+
+// render lists both desktop / mobile
+function renderLists(){
+  const list = qs('#list'); const mList = qs('#mList');
+  const html = points.map((p,i)=>rowHTML(p,i)).join('');
+  if(list) list.innerHTML = html;
+  if(mList) mList.innerHTML = html;
+  // bind
+  qsa('.row').forEach(el=> el.addEventListener('click', ()=> selectIdx(parseInt(el.dataset.idx)) ));
+}
+
+// search
+function attachSearch(){
+  const f = (inputId, listContainerId)=>{
+    const inp = qs(inputId); const cont = qs(listContainerId);
+    if(!inp||!cont) return;
+    inp.addEventListener('input', ()=>{
+      const q = inp.value.trim().toLowerCase();
+      qsa('.row', cont).forEach(row=>{
+        const ok = row.textContent.toLowerCase().includes(q);
+        row.style.display = ok ? '' : 'none';
+      });
+    });
+  };
+  attachSearch.done || (attachSearch.done=true);
+  f('#search', '#list');
+  f('#mSearch', '#mList');
+}
+
+// mobile sheets open/close
+function openSheet(which){
+  if(which==='list'){ qs('#sheetList').classList.add('open'); }
+  if(which==='detail'){ qs('#sheetDetail').classList.add('open'); }
+}
+function closeSheet(which){
+  if(which==='list'){ qs('#sheetList').classList.remove('open'); }
+  if(which==='detail'){ qs('#sheetDetail').classList.remove('open'); }
+}
+qs('#btnList').addEventListener('click', ()=>{
+  const el = qs('#sheetList'); el.classList.toggle('open');
+});
+qs('#btnDetail').addEventListener('click', ()=>{
+  const el = qs('#sheetDetail'); el.classList.toggle('open');
+});
+
+// load KML
+async function loadKML(url){
+  const res = await fetch(url, {mode:'cors'});
+  const txt = await res.text();
+  const xml = (new DOMParser()).parseFromString(txt, 'text/xml');
+  const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+  const out = [];
+  for(const pm of placemarks){
+    const name = (pm.getElementsByTagName('name')[0]?.textContent||'').trim();
+    const desc = pm.getElementsByTagName('description')[0]?.textContent || '';
+    // coordinates order: lon,lat[,alt]
+    const coordText = pm.getElementsByTagName('coordinates')[0]?.textContent?.trim();
+    if(!coordText) continue;
+    const parts = coordText.split(/[,\s]+/).filter(Boolean);
+    const lon = parseFloat(parts[0]), lat = parseFloat(parts[1]);
+    if(isNaN(lat)||isNaN(lon)) continue;
+    const {photos, data} = parseDesc(desc);
+    out.push({name, lat, lng:lon? (lat && lon ? lat : 0): lat, lng: lon, photos, data}); // fix ordering
+    // Correction: ensure lat, lng properly assigned
+    out[out.length-1].lat = lat;
+    out[out.length-1].lng = lon;
+  }
+  addPoints(out);
+  attachSearch();
+}
+
+// UI buttons load
+qs('#btnLoad').addEventListener('click', ()=>{
+  const url = qs('#dataUrl').value.trim() || 'baches.kml';
+  loadKML(url);
+});
+qs('#btnReload').addEventListener('click', ()=>{
+  const url = qs('#dataUrl').value.trim() || 'baches.kml';
+  loadKML(url);
+});
+qs('#btnLocal').addEventListener('click', ()=>{
+  const inp = document.createElement('input'); inp.type='file'; inp.accept='.kml,.kmz';
+  inp.onchange = async () => {
+    const file = inp.files[0]; if(!file) return;
+    const txt = await file.text();
+    const xml = (new DOMParser()).parseFromString(txt, 'text/xml');
+    const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+    const out=[];
+    for(const pm of placemarks){
+      const name = (pm.getElementsByTagName('name')[0]?.textContent||'').trim();
+      const desc = pm.getElementsByTagName('description')[0]?.textContent || '';
+      const coordText = pm.getElementsByTagName('coordinates')[0]?.textContent?.trim();
+      if(!coordText) continue;
+      const parts = coordText.split(/[,\s]+/).filter(Boolean);
+      const lon = parseFloat(parts[0]), lat = parseFloat(parts[1]);
+      if(isNaN(lat)||isNaN(lon)) continue;
+      const {photos, data} = parseDesc(desc);
+      out.push({name, lat, lng:lon? (lat && lon ? lat : 0): lat, lng: lon, photos, data});
+      out[out.length-1].lat = lat; out[out.length-1].lng = lon;
+    }
+    addPoints(out);
+    attachSearch();
+  };
+  inp.click();
+});
+
+// init
+const def = getParam('data','baches.kml');
+qs('#dataUrl').value = def;
+loadKML(def);
+
+// desktop toggles via keyboard (optional)
+document.addEventListener('keydown', (e)=>{
+  if(e.key==='l'){ // toggle list
+    const el = qs('#listDrawer');
+    el.style.display = (getComputedStyle(el).display==='none')?'flex':'none';
+  }
+  if(e.key==='p'){
+    const el = qs('#detailDrawer');
+    el.style.display = (getComputedStyle(el).display==='none')?'flex':'none';
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nogales · Baches (PRO)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{--bg:#0b1220;--fg:#e5e7eb;--mut:#94a3b8;--accent:#3b82f6;--panel:#0f172a}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 Inter,system-ui,Segoe UI,Roboto,Arial}
+  #app{display:grid;grid-template-columns:1fr 360px;height:100%}
+  #map{height:100%}
+  #side{background:var(--panel);border-left:1px solid #1f2937;display:flex;flex-direction:column}
+  .head{padding:10px 12px;border-bottom:1px solid #1f2937;display:flex;gap:8px;align-items:center}
+  .head input{flex:1;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:8px 10px;color:var(--fg);outline:none}
+  .btn{background:#0b1220;border:1px solid #1f2937;color:#d1d5db;border-radius:8px;padding:8px 10px;cursor:pointer}
+  .btn:active{transform:translateY(1px)}
+  .scroll{overflow:auto;padding:12px}
+  .pill{display:inline-block;background:#0b1220;border:1px solid #1f2937;border-radius:999px;padding:4px 8px;margin-right:6px;color:#a5b4fc}
+  h3{margin:6px 0 8px 0;font-size:16px}
+  .photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .photos img{width:100%;height:92px;object-fit:cover;border-radius:8px;border:1px solid #1f2937}
+  .kv{margin-bottom:8px}
+  .kv b{color:#93c5fd}
+  @media (max-width:900px){ #app{grid-template-columns:1fr}; #side{position:absolute;z-index:999;right:0;top:0;width:96%;height:65%;box-shadow:0 8px 24px rgba(0,0,0,.4);border-radius:12px;overflow:hidden;border:1px solid #1f2937;display:none} #toggle{display:inline-block}}
+  #legend{position:absolute;left:10px;top:10px;background:#111827;color:#e5e7eb;padding:6px 10px;border-radius:8px;font-size:12px;z-index:500}
+</style>
+<!-- togeojson -->
+<script src="https://cdn.jsdelivr.net/npm/togeojson@0.16.0/dist/togeojson.umd.js"></script>
+<script>if(!window.toGeoJSON&&!window.togeojson)document.write('<script src="https://unpkg.com/togeojson/dist/togeojson.umd.js"><\\/script>');</script>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+  <aside id="side">
+    <div class="head">
+      <button id="toggle" class="btn" style="display:none">Cerrar</button>
+      <input id="q" placeholder="Buscar bache por texto..." />
+      <button id="btnRefresh" class="btn">Actualizar</button>
+    </div>
+    <div id="panel" class="scroll">
+      <div class="pill">Listo para seleccionar un bache</div>
+      <p>Haz clic en un trazo o punto azul.</p>
+    </div>
+  </aside>
+</div>
+<div id="legend">Capas ⇧ (esquina sup. derecha). Usa “Actualizar” tras publicar un KML nuevo.</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const osm  = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:20, attribution:'© OSM'});
+const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19, attribution:'Tiles © Esri'});
+const map = L.map('map',{preferCanvas:true,layers:[esri]}).setView([31.307,-110.948], 13);
+L.control.layers({"Satélite (Esri)":esri,"Calles (OSM)":osm},{},{collapsed:false}).addTo(map);
+
+const qs=new URLSearchParams(location.search);
+const url=qs.get('data')||'baches.kml';
+const isMobile=matchMedia('(max-width:900px)').matches;
+const $side=document.getElementById('side');
+const $panel=document.getElementById('panel');
+const $q=document.getElementById('q');
+const $toggle=document.getElementById('toggle');
+if(isMobile){ $toggle.style.display='inline-block'; $toggle.onclick=()=>{ $side.style.display='none'; }; }
+
+function openSide(){ if(isMobile){ $side.style.display='block'; } }
+document.getElementById('btnRefresh').onclick=()=>location.reload();
+
+function getFirstUrl(str){
+  if(typeof str!=='string') return null;
+  const m=str.match(/https?:\/\/[^\s"'<>]+/g);
+  return m?m[0]:null;
+}
+function prettyKV(k,v){
+  if(v==null||v=== '') return '';
+  return `<div class="kv"><b>${k}:</b> ${v}</div>`;
+}
+function centroidLatLng(layer){
+  if(layer.getCenter) return layer.getCenter();
+  try{
+    const b=layer.getBounds();
+    if(b && b.isValid()) return b.getCenter();
+  }catch(_){}
+  return null;
+}
+
+// Robust loader
+async function fetchText(u){ const r=await fetch(u+(u.includes('?')?'&':'?')+'t='+Date.now()); if(!r.ok) throw new Error('HTTP '+r.status); return await r.text(); }
+
+function parseCoordinatesBlock(txt){
+  const tokens = txt.trim().split(/\s+/);
+  const coords = [];
+  for(const t of tokens){
+    const p=t.split(',').map(Number);
+    if(p.length>=2 && isFinite(p[0]) && isFinite(p[1])) coords.push([p[1],p[0]]); // Leaflet lat,lon
+  }
+  return coords;
+}
+function kmlFallbackAll(kmlText){
+  const feats=[];
+  const pmRx=/<Placemark[\s\S]*?<\/Placemark>/gi;
+  let m;
+  while((m=pmRx.exec(kmlText))){
+    const block=m[0];
+    const props={};
+    // SimpleData -> props
+    block.replace(/<SimpleData[^>]*name="([^"]+)"[^>]*>([\s\S]*?)<\/SimpleData>/gi,(a,n,v)=>{props[n]=v.replace(/<[^>]+>/g,'').trim();});
+    // name tag
+    const nm=/<name>([\s\S]*?)<\/name>/i.exec(block); if(nm) props.name=nm[1].trim();
+    // try Point
+    const pt=/<Point>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/Point>/i.exec(block);
+    if(pt){
+      const parts=pt[1].trim().split(',').map(Number);
+      if(parts.length>=2 && isFinite(parts[0])&&isFinite(parts[1])){
+        feats.push({type:'Feature',geometry:{type:'Point',coordinates:[parts[0],parts[1]]},properties:props});
+        continue;
+      }
+    }
+    // try LineString
+    const ln=/<LineString>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/LineString>/i.exec(block);
+    if(ln){
+      const coords=parseCoordinatesBlock(ln[1]);
+      feats.push({type:'Feature',geometry:{type:'LineString',coordinates:coords.map(([lat,lon])=>[lon,lat])},properties:props});
+      continue;
+    }
+    // try Polygon (outer)
+    const pg=/<Polygon>[\s\S]*?<outerBoundaryIs>[\s\S]*?<LinearRing>[\s\S]*?<coordinates>([^<]+)<\/coordinates>[\s\S]*?<\/LinearRing>[\s\S]*?<\/outerBoundaryIs>[\s\S]*?<\/Polygon>/i.exec(block);
+    if(pg){
+      const coords=parseCoordinatesBlock(pg[1]);
+      feats.push({type:'Feature',geometry:{type:'Polygon',coordinates:[coords.map(([lat,lon])=>[lon,lat])]},properties:props});
+      continue;
+    }
+  }
+  return {type:'FeatureCollection',features:feats};
+}
+
+let layerGroup=null;
+
+(async()=>{
+  const txt=await fetchText(url);
+  let gj=null;
+  const TG=window.toGeoJSON||window.togeojson;
+  try{
+    if(TG){ const xml=new DOMParser().parseFromString(txt,'text/xml'); gj=TG.kml(xml); }
+  }catch(_){}
+  if(!gj || !gj.features || !gj.features.length){ gj=kmlFallbackAll(txt); }
+
+  if(layerGroup) map.removeLayer(layerGroup);
+  layerGroup = L.geoJSON(gj, {
+    style: f => ({ color:'#3b82f6', weight:6, opacity:0.85 }),
+    pointToLayer: (f,latlng) => L.circleMarker(latlng, {radius:6, weight:1, fillOpacity:0.9, color:'#1e40af', fillColor:'#3b82f6'}),
+    onEachFeature: (f, layer) => {
+      layer.on('click', () => {
+        // Build panel content
+        const p=f.properties||{};
+        const foto1=getFirstUrl(p.Fotoantes||p.FotoAntes||p.fotoantes||p.Foto_antes||'');
+        const foto2=getFirstUrl(p.FotoReferencia||p.fotoreferencia||'');
+        const foto3=getFirstUrl(p.FotoFinal||p.fotofinal||'');
+
+        const html=`
+          <h3>${p.name||'Bache'}</h3>
+          <div class="pill">${p.TipodeTrabajo||p.TipoDeTrabajo||p.Tipo||'—'}</div>
+          <div class="pill"># ${p.NumeroDeBache||p.Numero||p.No||'—'}</div>
+          ${prettyKV('Ancho', p.Ancho)}
+          ${prettyKV('Largo', p.Largo)}
+          ${prettyKV('Cadenamiento', p.Cadenamiento||p.Cadenamientox)}
+          ${prettyKV('Colonia', p.Colonia)}
+          ${prettyKV('Calle', p.Calle)}
+          ${prettyKV('Entre calles', p.Entrecalles||p.EntreCalles)}
+          ${prettyKV('Collector', p.Collector)}
+          ${prettyKV('Creado', p.Createdon||p.Creado||p.Fecha)}
+          <div style="margin:10px 0">
+            <a class="btn" target="_blank" href="https://www.google.com/maps?q=${layer.getLatLng?layer.getLatLng().lat+','+layer.getLatLng().lng:(centroidLatLng(layer)||{lat:map.getCenter().lat,lng:map.getCenter().lng}).lat},${(layer.getLatLng?layer.getLatLng().lng:(centroidLatLng(layer)||{lat:map.getCenter().lat,lng:map.getCenter().lng}).lng)}">Ver en Maps</a>
+          </div>
+          <h3>Fotos</h3>
+          <div class="photos">
+            ${foto1?`<a href="${foto1}" target="_blank"><img src="${foto1}"/></a>`:''}
+            ${foto2?`<a href="${foto2}" target="_blank"><img src="${foto2}"/></a>`:''}
+            ${foto3?`<a href="${foto3}" target="_blank"><img src="${foto3}"/></a>`:''}
+          </div>
+        `;
+        $panel.innerHTML=html;
+        openSide();
+        const c = layer.getLatLng ? layer.getLatLng() : centroidLatLng(layer);
+        if(c) map.flyTo(c, 18, {duration:.6});
+      });
+    }
+  }).addTo(map);
+
+  // Fit bounds
+  try{ const b=layerGroup.getBounds(); if(b && b.isValid()) map.fitBounds(b.pad(0.15)); }catch(_){}
+})();
+
+// Buscar (filtra por texto en properties)
+$q.addEventListener('input', ()=>{
+  const txt=$q.value.trim().toLowerCase();
+  layerGroup.eachLayer(ly=>{
+    const p = (ly.feature && ly.feature.properties) ? JSON.stringify(ly.feature.properties).toLowerCase() : '';
+    const ok = !txt || p.includes(txt);
+    if(ok){ ly.setStyle && ly.setStyle({opacity:0.85}); ly.setStyle && ly.setStyle({opacity:0.85}); ly._path && (ly._path.style.display=''); ly._renderer && ly._renderer._container && (ly._renderer._container.style.display=''); if(ly._icon) ly._icon.style.display=''; }
+    else { ly._path && (ly._path.style.display='none'); if(ly._icon) ly._icon.style.display='none'; }
+  });
+});
+</script>
+</body>
+</html>
